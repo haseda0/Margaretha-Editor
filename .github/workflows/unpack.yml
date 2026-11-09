@@ -26,6 +26,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Workflow files need a separate user-authorized commit; the action token cannot change them.
+          git restore --source=HEAD --staged --worktree .github/workflows
           git add -A
-          git commit -m "Add Margaretha Editor source code"
+          git diff --cached --quiet || git commit -m "Add Margaretha Editor source code"
           git push
