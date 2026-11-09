@@ -1,0 +1,31 @@
+name: Extract Margaretha Source
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'margaretha-editor-phase1.zip'
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract source
+        run: |
+          unzip -oq margaretha-editor-phase1.zip -d .
+          rm -f .github/workflows/build.yml
+          rm -f margaretha-editor-phase1.zip
+
+      - name: Commit source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add Margaretha Editor source"
+          git push
