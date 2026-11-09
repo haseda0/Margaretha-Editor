@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import id.haseda.margaretha.timeline.RenderSegment
@@ -22,6 +24,7 @@ import kotlinx.coroutines.launch
  * same [RenderSegment]s the exporter uses, so in/out points match the rendered file.
  * Must be used from the main thread.
  */
+@OptIn(UnstableApi::class)
 class PreviewController(context: Context, private val scope: CoroutineScope) {
     val player: ExoPlayer = ExoPlayer.Builder(context).build().apply {
         setSeekParameters(SeekParameters.EXACT)
@@ -52,7 +55,7 @@ class PreviewController(context: Context, private val scope: CoroutineScope) {
                 }
             }
 
-            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = applyVolume()
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) { applyVolume(); applyColorLook() }
 
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_ENDED) _positionUs.value = totalUs
@@ -77,6 +80,7 @@ class PreviewController(context: Context, private val scope: CoroutineScope) {
         totalUs = acc
         if (!structureChanged) {
             applyVolume()
+            applyColorLook()
             return
         }
         _error.value = null
@@ -100,11 +104,13 @@ class PreviewController(context: Context, private val scope: CoroutineScope) {
         val target = keepTimeUs.coerceIn(0L, (totalUs - 1).coerceAtLeast(0L))
         val (index, offsetUs) = locate(target)
         val wasPlaying = player.playWhenReady
+        player.setVideoEffects(colorEffects(newSegments.getOrNull(index)?.colorLook ?: id.haseda.margaretha.timeline.ColorLook.ORIGINAL))
         player.setMediaItems(items, index, offsetUs / US_PER_MS)
         player.prepare()
         player.playWhenReady = wasPlaying
         _positionUs.value = target
         applyVolume()
+        applyColorLook()
     }
 
     private fun RenderSegment.structureKey() = Triple(clipId, uri, startMs to endMs)
@@ -155,6 +161,11 @@ class PreviewController(context: Context, private val scope: CoroutineScope) {
     private fun applyVolume() {
         val i = player.currentMediaItemIndex
         player.volume = segments.getOrNull(i)?.volume ?: 1f
+    }
+
+    private fun applyColorLook() {
+        val i = player.currentMediaItemIndex
+        player.setVideoEffects(segments.getOrNull(i)?.let { colorEffects(it.colorLook) } ?: emptyList())
     }
 
     private fun publishPosition() {

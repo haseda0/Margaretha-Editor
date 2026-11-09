@@ -44,6 +44,10 @@ data class SetClipAudio(val clipId: String, val volume: Float, val muted: Boolea
     override val label: String get() = if (muted) "Bisukan klip" else "Ubah volume"
 }
 
+data class SetClipColorLook(val clipId: String, val look: ColorLook) : Edit {
+    override val label: String get() = "Warna: ${look.title}"
+}
+
 data class RenameProject(val name: String) : Edit {
     override val label: String get() = "Ganti nama"
 }
@@ -72,6 +76,7 @@ object TimelineEngine {
             is DeleteClips -> delete(project, edit)
             is DuplicateClip -> duplicate(project, edit)
             is SetClipAudio -> setAudio(project, edit)
+            is SetClipColorLook -> setColorLook(project, edit)
             is RenameProject -> rename(project, edit)
             is RelinkAsset -> relink(project, edit)
         }
@@ -86,9 +91,23 @@ object TimelineEngine {
     private fun addClips(project: Project, edit: AddClips): EditOutcome {
         if (edit.assets.isEmpty()) return reject("Tidak ada media yang dipilih.")
         if (edit.assets.size != edit.newClipIds.size) return reject("Jumlah ID klip tidak cocok.")
+        if (edit.newClipIds.any { it.isBlank() }) return reject("ID klip tidak boleh kosong.")
+        if (edit.assets.any { it.id.isBlank() }) return reject("ID media tidak boleh kosong.")
+        if (edit.assets.map { it.id }.toSet().size != edit.assets.size) {
+            return reject("Daftar media berisi ID aset duplikat.")
+        }
+        val existingAssetIds = project.assets.keys
+        if (edit.assets.any { it.id in existingAssetIds }) {
+            return reject("Media sudah ada di proyek. Impor ulang dengan referensi aset yang sama tidak diizinkan.")
+        }
         edit.assets.forEach { asset ->
             if (!asset.hasVideo) return reject("\"${asset.displayName}\" tidak memiliki trek video.")
             if (asset.durationUs < MIN_CLIP_US) return reject("\"${asset.displayName}\" terlalu pendek.")
+            if (asset.uri.isBlank() || asset.displayName.isBlank() || asset.mimeType.isBlank() ||
+                asset.width <= 0 || asset.height <= 0
+            ) {
+                return reject("Metadata media \"${asset.displayName}\" tidak valid.")
+            }
         }
         val track = project.mainTrack
         val existingIds = project.tracks.flatMap { t -> t.clips.map { it.id } }.toSet()
@@ -177,6 +196,13 @@ object TimelineEngine {
         if (edit.volume !in 0f..1f) return reject("Volume harus 0–100%.")
         if (clip.volume == edit.volume && clip.muted == edit.muted) return reject("Tidak ada perubahan.")
         val updated = clip.copy(volume = edit.volume, muted = edit.muted)
+        return EditOutcome.Applied(project.replaceTrack(track.copy(clips = track.clips.map { if (it.id == clip.id) updated else it })))
+    }
+
+    private fun setColorLook(project: Project, edit: SetClipColorLook): EditOutcome {
+        val (track, clip) = project.findClip(edit.clipId) ?: return reject("Klip tidak ditemukan.")
+        if (clip.colorLook == edit.look) return reject("Look warna sudah digunakan.")
+        val updated = clip.copy(colorLook = edit.look)
         return EditOutcome.Applied(project.replaceTrack(track.copy(clips = track.clips.map { if (it.id == clip.id) updated else it })))
     }
 

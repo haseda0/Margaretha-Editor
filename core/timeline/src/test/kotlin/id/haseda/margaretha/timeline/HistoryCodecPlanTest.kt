@@ -75,10 +75,37 @@ class ProjectCodecTest {
     }
 
     @Test
+    fun duplicateAssetIdsAreRejectedBeforeMapConstruction() {
+        val encoded = ProjectCodec.encode(projectWith(2.0, 3.0))
+        val duplicateId = encoded.replaceFirst("\"id\":\"a1\"", "\"id\":\"a0\"")
+        val result = ProjectCodec.decode(duplicateId)
+        assertTrue(result is ProjectCodec.DecodeResult.Failure)
+        assertTrue((result as ProjectCodec.DecodeResult.Failure).reason.contains("ID media ganda"))
+    }
+
+    @Test
     fun newerSchemaIsRefusedWithClearMessage() {
-        val text = ProjectCodec.encode(projectWith(2.0)).replace("\"schemaVersion\":1", "\"schemaVersion\":99")
+        val text = ProjectCodec.encode(projectWith(2.0)).replace("\"schemaVersion\":2", "\"schemaVersion\":99")
         val r = ProjectCodec.decode(text) as ProjectCodec.DecodeResult.Failure
         assertTrue(r.reason.contains("lebih baru"))
+    }
+
+    @Test
+    fun v1ProjectsMigrateWithOriginalColorLook() {
+        val v1 = ProjectCodec.encode(projectWith(2.0))
+            .replace("\"schemaVersion\":2", "\"schemaVersion\":1")
+            .replace(",\"colorLook\":\"ORIGINAL\"", "")
+        val decoded = ProjectCodec.decode(v1) as ProjectCodec.DecodeResult.Success
+        assertEquals(ColorLook.ORIGINAL, decoded.project.mainTrack.clips.single().colorLook)
+    }
+
+    @Test
+    fun colorLookIsUndoableAndIncludedInRenderPlan() {
+        val session = EditorSession(projectWith(2.0))
+        assertTrue(session.perform(SetClipColorLook("c0", ColorLook.CINEMATIC)) is EditOutcome.Applied)
+        assertEquals(ColorLook.CINEMATIC, RenderSegments.of(session.project).single().colorLook)
+        session.undo()
+        assertEquals(ColorLook.ORIGINAL, session.project.mainTrack.clips.single().colorLook)
     }
 
     @Test

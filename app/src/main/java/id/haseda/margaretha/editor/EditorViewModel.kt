@@ -12,6 +12,7 @@ import id.haseda.margaretha.media.PreviewController
 import id.haseda.margaretha.media.ProbeResult
 import id.haseda.margaretha.timeline.AddClips
 import id.haseda.margaretha.timeline.Clip
+import id.haseda.margaretha.timeline.ColorLook
 import id.haseda.margaretha.timeline.DeleteClips
 import id.haseda.margaretha.timeline.DuplicateClip
 import id.haseda.margaretha.timeline.Edit
@@ -28,6 +29,7 @@ import id.haseda.margaretha.timeline.RenameProject
 import id.haseda.margaretha.timeline.RenderSegments
 import id.haseda.margaretha.timeline.ResolutionPreset
 import id.haseda.margaretha.timeline.SetClipAudio
+import id.haseda.margaretha.timeline.SetClipColorLook
 import id.haseda.margaretha.timeline.SplitClip
 import id.haseda.margaretha.timeline.TimelineEngine
 import id.haseda.margaretha.timeline.TrimClip
@@ -263,6 +265,10 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setAudio(clipId: String, volume: Float, muted: Boolean) {
         perform(SetClipAudio(clipId, volume.coerceIn(0f, 1f), muted), select = clipId)
+    }
+
+    fun setColorLook(clipId: String, look: ColorLook) {
+        perform(SetClipColorLook(clipId, look), select = clipId)
     }
 
     fun rename(name: String) {

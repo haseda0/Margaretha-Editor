@@ -53,6 +53,18 @@ class TimelineEngineTest {
     }
 
     @Test
+    fun addRejectsInvalidOrDuplicateAssetsWithoutChangingProject() {
+        val before = projectWith(2.0)
+        val zeroWidth = asset("new", 2.0).copy(width = 0)
+        assertTrue(TimelineEngine.apply(before, AddClips(listOf(zeroWidth), listOf("new-clip"))) is EditOutcome.Rejected)
+
+        val duplicateIds = listOf(asset("new", 2.0), asset("new", 3.0))
+        assertTrue(TimelineEngine.apply(before, AddClips(duplicateIds, listOf("new-1", "new-2"))) is EditOutcome.Rejected)
+        assertEquals(1, before.assets.size)
+        assertEquals(listOf("c0"), before.mainTrack.clips.map { it.id })
+    }
+
+    @Test
     fun splitCreatesTwoGaplessPiecesWithSameSource() {
         val p = projectWith(4.0).applyOk(SplitClip("c0", 1_500_000L, "c0b"))
         val (left, right) = p.mainTrack.clips

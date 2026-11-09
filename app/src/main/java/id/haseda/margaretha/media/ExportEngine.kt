@@ -18,6 +18,7 @@ import androidx.media3.common.audio.ChannelMixingAudioProcessor
 import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.Presentation
+import id.haseda.margaretha.media.colorEffects
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EditedMediaItem
@@ -176,7 +177,7 @@ class ExportEngine(private val context: Context, private val scope: CoroutineSco
             val audio: List<AudioProcessor> = if (s.volume < 1f) listOf(volumeProcessor(s.volume)) else emptyList()
             EditedMediaItem.Builder(mediaItem)
                 .setFrameRate(plan.frameRate)
-                .setEffects(Effects(audio, listOf(presentation)))
+                .setEffects(Effects(audio, colorEffects(s.colorLook) + presentation))
                 .build()
         }
         // Audio+video track types: clips without sound contribute silence, keeping A/V in sync.

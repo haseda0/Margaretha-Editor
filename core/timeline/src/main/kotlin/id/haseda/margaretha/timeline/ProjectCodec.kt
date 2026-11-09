@@ -5,7 +5,7 @@ package id.haseda.margaretha.timeline
  * Decoding never throws: corrupted or unsupported files produce [DecodeResult.Failure].
  */
 object ProjectCodec {
-    const val SCHEMA_VERSION = 1
+    const val SCHEMA_VERSION = 2
     const val FORMAT_ID = "margaretha-editor-project"
 
     sealed interface DecodeResult {
@@ -39,7 +39,7 @@ object ProjectCodec {
                 "Proyek dibuat oleh versi Margaretha Editor yang lebih baru (skema $version).",
             )
             version < 1 -> DecodeResult.Failure("Versi skema tidak valid.")
-            else -> DecodeResult.Success(validate(decodeV1(migrate(root, version))))
+            else -> DecodeResult.Success(validate(decodeCurrent(migrate(root, version))))
         }
     } catch (e: JsonException) {
         DecodeResult.Failure("File proyek rusak: ${e.message}")
@@ -47,22 +47,43 @@ object ProjectCodec {
         DecodeResult.Failure("File proyek tidak konsisten: ${e.message}")
     }
 
-    /** Upgrades older schema documents step by step. v1 is the first schema, nothing to do yet. */
+    /** Upgrades older schema documents step by step. v1 clips receive default color look. */
     private fun migrate(root: Json.Obj, fromVersion: Int): Json.Obj {
         var doc = root
         var v = fromVersion
         while (v < SCHEMA_VERSION) {
-            // Future: when (v) { 1 -> doc = migrate1to2(doc) }
+            when (v) { 1 -> doc = migrate1to2(doc) }
             v++
         }
         return doc
     }
 
-    private fun decodeV1(root: Json.Obj): Project {
+    private fun migrate1to2(root: Json.Obj): Json.Obj {
+        val fields = root.fields.toMutableMap()
+        val tracks = root.arr("tracks").map { trackValue ->
+            val track = trackValue.obj()
+            val trackFields = track.fields.toMutableMap()
+            val clips = track.arr("clips").map { clipValue ->
+                val clipFields = clipValue.obj().fields.toMutableMap()
+                clipFields.putIfAbsent("colorLook", ColorLook.ORIGINAL.name.j())
+                Json.Obj(clipFields)
+            }
+            trackFields["clips"] = Json.Arr(clips)
+            Json.Obj(trackFields)
+        }
+        fields["tracks"] = Json.Arr(tracks)
+        fields["schemaVersion"] = 2.j()
+        return Json.Obj(fields)
+    }
+
+    private fun decodeCurrent(root: Json.Obj): Project {
         val canvasObj = root.req("canvas").obj()
         val aspect = runCatching { AspectRatio.valueOf(canvasObj.str("aspect")) }
             .getOrElse { throw JsonException("Rasio aspek tidak dikenal") }
         val assets = root.arr("assets").map { decodeAsset(it.obj()) }
+        if (assets.map { it.id }.toSet().size != assets.size) {
+            throw JsonException("ID media ganda.")
+        }
         return Project(
             id = root.str("id"),
             name = root.str("name"),
@@ -133,6 +154,7 @@ object ProjectCodec {
         "timelineStartUs" to c.timelineStartUs.j(),
         "volume" to c.volume.j(),
         "muted" to c.muted.j(),
+        "colorLook" to c.colorLook.name.j(),
     )
 
     private fun decodeClip(o: Json.Obj) = Clip(
@@ -143,6 +165,7 @@ object ProjectCodec {
         timelineStartUs = o.long("timelineStartUs"),
         volume = o.float("volume", 1f),
         muted = o.bool("muted", false),
+        colorLook = runCatching { ColorLook.valueOf(((o.fields["colorLook"] as? Json.Str)?.value ?: "ORIGINAL")) }.getOrElse { throw JsonException("Look warna tidak dikenal") },
     )
 }
 
@@ -151,6 +174,15 @@ object ProjectValidator {
     fun issues(project: Project): List<String> {
         val out = mutableListOf<String>()
         if (project.tracks.count { it.kind == TrackKind.MAIN_VIDEO } != 1) out += "Proyek harus punya tepat satu trek utama."
+        for ((assetId, asset) in project.assets) {
+            if (assetId != asset.id || asset.id.isBlank()) out += "ID media tidak konsisten."
+            if (asset.uri.isBlank() || asset.displayName.isBlank() || asset.mimeType.isBlank()) {
+                out += "Metadata media ${asset.id.ifBlank { "tanpa ID" }} tidak lengkap."
+            }
+            if (asset.durationUs <= 0L || asset.width <= 0 || asset.height <= 0) {
+                out += "Metadata media ${asset.id.ifBlank { "tanpa ID" }} tidak valid."
+            }
+        }
         val ids = project.tracks.flatMap { t -> t.clips.map { it.id } }
         if (ids.size != ids.toSet().size) out += "ID klip ganda."
         for (track in project.tracks) {

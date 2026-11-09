@@ -3,9 +3,9 @@
 Editor video Android native, pribadi, offline-first. Tanpa akun, tanpa iklan, tanpa watermark.
 Spesifikasi induk: *AURELIA Video Studio — Master Build Specification v1.0* (nama produk diganti menjadi **Margaretha Editor**).
 
-## Status: Phase 1 (vertical slice)
+## Status: Phase 1 + Color Studio foundation
 
-`IMPORT → PREVIEW → TRIM → SPLIT → COMBINE → EXPORT → PLAY EXPORTED MP4`
+`IMPORT → PREVIEW → TRIM → SPLIT → COLOR LOOKS → COMBINE → EXPORT → PLAY EXPORTED MP4`
 
 Lihat [FEATURE_STATUS.md](FEATURE_STATUS.md) untuk status jujur tiap fitur.
 

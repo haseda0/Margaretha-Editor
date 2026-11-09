@@ -13,6 +13,7 @@ data class RenderSegment(
     val startMs: Long,
     val endMs: Long,
     val volume: Float,
+    val colorLook: ColorLook = ColorLook.ORIGINAL,
 ) {
     val durationUs: Long get() = (endMs - startMs) * US_PER_MS
 }
@@ -23,7 +24,7 @@ object RenderSegments {
         val asset = project.assets[clip.assetId] ?: return@mapNotNull null
         val start = clip.sourceInUs / US_PER_MS
         val end = clip.sourceOutUs / US_PER_MS
-        if (end <= start) null else RenderSegment(clip.id, asset.uri, start, end, clip.effectiveVolume)
+        if (end <= start) null else RenderSegment(clip.id, asset.uri, start, end, clip.effectiveVolume, clip.colorLook)
     }
 }
 

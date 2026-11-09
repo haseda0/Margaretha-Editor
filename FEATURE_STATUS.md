@@ -28,6 +28,13 @@ Legenda: ✅ Diimplementasi & dites · 🟡 Diimplementasi, belum dites penuh (b
 | Kelola proyek: buat, buka, ganti nama, duplikat, hapus (konfirmasi) | 🟡 | |
 | Tata letak adaptif portrait/landscape | 🟡 | |
 
+## Phase 2 — Color Looks (source update)
+| Fitur | Status | Catatan |
+|---|---|---|
+| 7 color looks non-destruktif (Original, Cinematic, Vivid, Warm, Cool, Matte Fade, B&W) | 🟡 | Media3 GPU effects diterapkan pada preview per klip dan pipeline MP4 export; perlu uji perangkat |
+| Penyimpanan look dalam proyek + migrasi skema v1 → v2 | ✅ kode + tes ditambahkan | Proyek lama otomatis memakai Original |
+| Undo/redo perubahan look | ✅ mesin perintah | |
+
 ## Belum (sesuai ROADMAP)
 | Fitur | Status |
 |---|---|
@@ -42,3 +49,8 @@ Legenda: ✅ Diimplementasi & dites · 🟡 Diimplementasi, belum dites penuh (b
 | Export di foreground service (tahan aplikasi ditutup) | 📋 Phase 6 — saat ini layar dijaga menyala; file yatim dibersihkan saat start |
 | Video HDR dipertahankan HDR | ⛔ v1 — HDR di-tone-map ke SDR agar campuran klip konsisten |
 | Volume > 100% | ⛔ v1 — ExoPlayer preview tidak mendukung gain > 1, demi kesamaan preview/export |
+
+## Audit kualitas Phase 2 — 9 November 2026
+- Menambahkan validasi impor di `TimelineEngine.addClips`: ID klip/aset kosong, ID aset duplikat dalam satu batch, konflik ID aset dengan proyek, durasi/metadata tidak valid kini ditolak sebelum state proyek diubah.
+- Alasan: mencegah map aset tertimpa diam-diam sehingga klip lama dapat menunjuk ke media yang salah.
+- Verifikasi lokal: inspeksi source dan diff dilakukan. Build Gradle/JVM test belum dapat dijalankan di lingkungan audit karena distribusi Gradle 9.5.0 tidak dapat diunduh (`UnknownHostException: services.gradle.org`). Jangan menandai perubahan ini sebagai build-lulus sebelum CI menjalankannya.

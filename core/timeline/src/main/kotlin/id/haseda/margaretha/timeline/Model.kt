@@ -48,6 +48,7 @@ data class Clip(
     /** Linear gain 0.0..1.0 applied to the clip's original audio. */
     val volume: Float = 1f,
     val muted: Boolean = false,
+    val colorLook: ColorLook = ColorLook.ORIGINAL,
 ) {
     init {
         require(sourceInUs >= 0) { "sourceInUs must be >= 0" }
@@ -63,6 +64,17 @@ data class Clip(
     val effectiveVolume: Float get() = if (muted) 0f else volume
 
     fun containsTimelineUs(timeUs: Long): Boolean = timeUs >= timelineStartUs && timeUs < timelineEndUs
+}
+
+/** Real-time color looks supported by both Media3 preview and MP4 export. */
+enum class ColorLook(val title: String, val hue: Float, val saturation: Float, val lightness: Float, val contrast: Float, val monochrome: Boolean = false) {
+    ORIGINAL("Asli", 0f, 0f, 0f, 0f),
+    CINEMATIC("Cinematic", -4f, -18f, -2f, 0.16f),
+    VIVID("Vivid", 0f, 24f, 2f, 0.08f),
+    WARM("Warm", 12f, 12f, 3f, 0.04f),
+    COOL("Cool", -12f, 8f, 0f, 0.08f),
+    FADE("Matte Fade", 0f, -12f, 8f, -0.12f),
+    MONOCHROME("B&W", 0f, -100f, 0f, 0.12f, true),
 }
 
 enum class TrackKind { MAIN_VIDEO, OVERLAY_VIDEO, AUDIO, TEXT }

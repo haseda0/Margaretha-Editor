@@ -63,6 +63,7 @@ import androidx.media3.ui.PlayerView
 import id.haseda.margaretha.home.RenameDialog
 import id.haseda.margaretha.media.ExportState
 import id.haseda.margaretha.timeline.Project
+import id.haseda.margaretha.timeline.ColorLook
 import id.haseda.margaretha.timeline.Timecode
 import id.haseda.margaretha.ui.AccentPill
 import id.haseda.margaretha.ui.IconAction
@@ -84,6 +85,7 @@ fun EditorScreen(vm: EditorViewModel, onClose: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
     var showExport by rememberSaveable { mutableStateOf(false) }
     var volumeClipId by rememberSaveable { mutableStateOf<String?>(null) }
+    var lookClipId by rememberSaveable { mutableStateOf<String?>(null) }
     var renaming by remember { mutableStateOf(false) }
     var confirmStopExport by remember { mutableStateOf(false) }
     var relinkAssetId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -167,6 +169,10 @@ fun EditorScreen(vm: EditorViewModel, onClose: () -> Unit) {
                         onSplit = vm::splitAtPlayhead,
                         onTrimStart = vm::trimStartToPlayhead,
                         onTrimEnd = vm::trimEndToPlayhead,
+                        onColor = {
+                            val target = vm.clip(state.selectedClipId) ?: project.mainTrack.clipAt(position)
+                            if (target != null) { vm.select(target.id); lookClipId = target.id }
+                        },
                         onVolume = {
                             val target = vm.clip(state.selectedClipId) ?: project.mainTrack.clipAt(position)
                             if (target != null) {
@@ -205,6 +211,13 @@ fun EditorScreen(vm: EditorViewModel, onClose: () -> Unit) {
         ExportSheet(vm = vm, exportState = exportState, onDismiss = { if (!exportBusy) { showExport = false; vm.export.reset() } })
     }
     val volumeClip = vm.clip(volumeClipId)
+    val lookClip = vm.clip(lookClipId)
+    if (lookClip != null) {
+        ColorLookSheet(lookClip.colorLook, onDismiss = { lookClipId = null }) { look ->
+            vm.setColorLook(lookClip.id, look)
+            lookClipId = null
+        }
+    }
     if (volumeClip != null) {
         VolumeSheet(volumeClip, onDismiss = { volumeClipId = null }) { v, muted ->
             vm.setAudio(volumeClip.id, v, muted)
@@ -417,6 +430,7 @@ private fun Toolbar(
     onTrimStart: () -> Unit,
     onTrimEnd: () -> Unit,
     onVolume: () -> Unit,
+    onColor: () -> Unit,
     onDuplicate: () -> Unit,
     onMoveLeft: () -> Unit,
     onMoveRight: () -> Unit,
@@ -435,11 +449,33 @@ private fun Toolbar(
         ToolButton(MIcons.TrimStart, "Trim awal", onTrimStart, enabled = hasClips)
         ToolButton(MIcons.TrimEnd, "Trim akhir", onTrimEnd, enabled = hasClips)
         ToolButton(MIcons.Volume, "Volume", onVolume, enabled = hasClips)
+        ToolButton(MIcons.Sparkle, "Warna", onColor, enabled = hasClips)
         ToolButton(MIcons.Duplicate, "Duplikat", onDuplicate, enabled = hasClips)
         ToolButton(MIcons.MoveLeft, "Geser kiri", onMoveLeft, enabled = hasClips)
         ToolButton(MIcons.MoveRight, "Geser kanan", onMoveRight, enabled = hasClips)
         ToolButton(MIcons.Delete, "Hapus", onDelete, enabled = hasClips, danger = true)
     }
+}
+
+
+@Composable
+private fun ColorLookSheet(current: ColorLook, onDismiss: () -> Unit, onApply: (ColorLook) -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Color Studio", color = MColors.Text) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Look diterapkan ke klip terpilih dan ikut dirender saat ekspor.", color = MColors.TextMuted, style = MaterialTheme.typography.bodySmall)
+                ColorLook.entries.forEach { look ->
+                    TextButton(onClick = { onApply(look) }, modifier = Modifier.fillMaxWidth()) {
+                        Text((if (look == current) "✓  " else "    ") + look.title, color = if (look == current) MColors.AccentBright else MColors.Text)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Tutup", color = MColors.Accent) } },
+        containerColor = MColors.Surface2,
+    )
 }
 
 @Composable
