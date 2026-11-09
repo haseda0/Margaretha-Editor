@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Original mark: a film frame whose aperture forms an "M", with a warm playhead. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#00000000" android:strokeColor="#FFF3EFEA" android:strokeWidth="3.2"
+        android:pathData="M33,36h42a5,5 0 0 1 5,5v26a5,5 0 0 1 -5,5h-42a5,5 0 0 1 -5,-5v-26a5,5 0 0 1 5,-5z" />
+    <path android:fillColor="#00000000" android:strokeColor="#FFE8A27A" android:strokeWidth="4.2"
+        android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M40,64V45l14,12 14,-12v19" />
+    <path android:fillColor="#FFE8A27A" android:pathData="M53,27h2v54h-2z" android:fillAlpha="0.55" />
+</vector>
