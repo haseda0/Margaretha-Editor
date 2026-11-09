@@ -1,16 +1,16 @@
-
 name: Build Margaretha Editor APK
 
 on:
   workflow_dispatch:
   push:
     branches: [main]
+  pull_request:
 
 permissions:
   contents: read
 
 jobs:
-  build:
+  validate-and-build:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,18 +22,33 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Build Debug APK
+      - name: Validate and build
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew :core:timeline:test :app:assembleDebug :app:assembleRelease :app:lintDebug --stacktrace
 
-      - name: Upload APK
+      - name: Upload debug APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Margaretha-Editor-APK
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+          name: margaretha-editor-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: warn
+
+      - name: Upload release APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: margaretha-editor-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: warn
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: margaretha-editor-lint
+          path: app/build/reports/lint-results-debug.html
+          if-no-files-found: warn
