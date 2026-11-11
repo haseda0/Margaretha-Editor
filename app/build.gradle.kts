@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose)
@@ -6,7 +8,7 @@ plugins {
 // Account backend (Supabase). Values come from the environment (CI) or an untracked
 // backend.properties; when absent the app is built without accounts and says so in the UI.
 val backendFile = rootProject.file("backend.properties")
-val backendProps = java.util.Properties().apply { if (backendFile.exists()) backendFile.inputStream().use { load(it) } }
+val backendProps = Properties().apply { if (backendFile.exists()) backendFile.inputStream().use { load(it) } }
 fun backendValue(key: String): String =
     (System.getenv("MARGARETHA_$key") ?: backendProps.getProperty(key) ?: "").trim().replace("\\", "").replace("\"", "")
 
