@@ -12,6 +12,14 @@ permissions:
 jobs:
   validate-and-build:
     runs-on: ubuntu-latest
+    env:
+      # Optional account backend. Without these the app is built in local mode.
+      MARGARETHA_SUPABASE_URL: ${{ vars.MARGARETHA_SUPABASE_URL }}
+      MARGARETHA_SUPABASE_ANON_KEY: ${{ secrets.MARGARETHA_SUPABASE_ANON_KEY }}
+      # Optional release signing. Without these the release is signed with the debug key.
+      MARGARETHA_KEYSTORE_PASSWORD: ${{ secrets.MARGARETHA_KEYSTORE_PASSWORD }}
+      MARGARETHA_KEY_ALIAS: ${{ secrets.MARGARETHA_KEY_ALIAS }}
+      MARGARETHA_KEY_PASSWORD: ${{ secrets.MARGARETHA_KEY_PASSWORD }}
 
     steps:
       - name: Checkout source
@@ -24,10 +32,35 @@ jobs:
           java-version: '17'
           cache: gradle
 
+      - name: Prepare release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.MARGARETHA_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "MARGARETHA_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          fi
+
       - name: Validate and build
         run: |
           chmod +x gradlew
-          ./gradlew :core:timeline:test :app:assembleDebug :app:assembleRelease :app:lintDebug --stacktrace
+          ./gradlew :core:timeline:test :app:assembleDebug :app:assembleRelease :app:bundleRelease :app:lintDebug --stacktrace
+
+      - name: Verify artifacts
+        run: |
+          set -e
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          for apk in app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/release/app-release.apk; do
+            echo "== $apk"
+            ls -l "$apk"
+            "$BT/apksigner" verify --verbose "$apk" | head -n 6
+            "$BT/aapt2" dump badging "$apk" | grep -E "^package|^sdkVersion|^targetSdkVersion|^application-label:|uses-permission"
+            unzip -l "$apk" | grep -E "classes.*\.dex|assets/shaders" 
+          done
+          AAB=app/build/outputs/bundle/release/app-release.aab
+          ls -l "$AAB"
+          unzip -l "$AAB" | grep -E "base/manifest/AndroidManifest.xml|base/dex/classes.dex|base/assets/shaders"
+          sha256sum app/build/outputs/apk/release/app-release.apk "$AAB"
 
       - name: Upload debug APK
         if: always()
@@ -45,10 +78,26 @@ jobs:
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: warn
 
+      - name: Upload release AAB
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: margaretha-editor-release-aab
+          path: app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: warn
+
       - name: Upload lint report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: margaretha-editor-lint
           path: app/build/reports/lint-results-debug.html
+          if-no-files-found: warn
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: margaretha-editor-test-results
+          path: core/timeline/build/test-results/test
           if-no-files-found: warn
