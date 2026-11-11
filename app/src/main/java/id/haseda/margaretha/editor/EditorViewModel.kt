@@ -580,7 +580,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         when (val outcome = ExportPlanner.plan(p, _exportSettings.value)) {
             is PlanOutcome.Invalid -> toast(outcome.reason)
             is PlanOutcome.Ready -> {
-                if (_state.value.missingAssetIds.isNotEmpty()) return toast("Tautkan ulang media yang hilang sebelum ekspor.")
+                // Only media that is actually on the timeline can block an export.
+                val used = p.tracks.flatMap { t -> t.clips.map { it.assetId } }.toSet()
+                if (_state.value.missingAssetIds.any { it in used }) return toast("Tautkan ulang media yang hilang sebelum ekspor.")
                 flushSave()
                 export.start(outcome.plan, p.name)
             }

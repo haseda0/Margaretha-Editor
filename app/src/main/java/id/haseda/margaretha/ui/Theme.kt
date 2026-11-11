@@ -28,7 +28,7 @@ object MColors {
     val LineStrong = Color(0xFF465063)
     val Text = Color(0xFFF3EFEA)        // warm white, L .95
     val TextMuted = Color(0xFFA7ADBB)   // 8.1:1 on Base
-    val TextFaint = Color(0xFF7A8193)   // 4.6:1 on Base
+    val TextFaint = Color(0xFF878EA0)   // 5.7:1 on Base, 4.9:1 on Surface2 (panels and dialogs)
     val Accent = Color(0xFFE8A27A)      // "Margaretha amber-rose" L .77 C .10 h 50
     val AccentBright = Color(0xFFF6C3A2)
     val AccentDeep = Color(0xFF9C5B3D)

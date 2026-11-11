@@ -1,6 +1,11 @@
 // One direction of a separable Gaussian blur (13 taps spread over the radius).
 // Run it twice: uDirection = (1,0) then (0,1). uRadius is in pixels; 0 leaves the frame untouched.
+// Old GPUs may lack high precision in fragment shaders; the maths still holds at medium.
+#ifdef GL_FRAGMENT_PRECISION_HIGH
 precision highp float;
+#else
+precision mediump float;
+#endif
 
 uniform sampler2D uTexSampler;
 uniform vec2 uTexel;
