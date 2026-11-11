@@ -103,6 +103,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     val preview = PreviewController(app, viewModelScope)
     val export = ExportEngine(app, viewModelScope)
     val thumbnails = container.thumbnails
+    val waveforms = container.waveforms
 
     private var session: EditorSession? = null
     private var saveJob: Job? = null
@@ -282,8 +283,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val at = preview.positionUs.value
         if (!clip.containsTimelineUs(at)) return toast("Letakkan playhead di dalam klip.")
         val offset = at - clip.timelineStartUs
-        if (perform(TrimClip(clip.id, clip.sourceInUs + offset, clip.sourceOutUs), select = clip.id)) {
-            seekTo(clip.timelineStartUs)
+        if (perform(TrimClip(clip.id, clip.sourceAtOffsetUs(offset), clip.sourceOutUs), select = clip.id)) {
+            // Main-track clips ripple left, so the playhead follows the new head; audio stays put.
+            if (!isAudioClip(clip.id)) seekTo(clip.timelineStartUs)
         }
     }
 
@@ -291,7 +293,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val clip = targetClip() ?: return toast("Pilih klip dulu.")
         val at = preview.positionUs.value
         if (!clip.containsTimelineUs(at)) return toast("Letakkan playhead di dalam klip.")
-        perform(TrimClip(clip.id, clip.sourceInUs, clip.sourceInUs + (at - clip.timelineStartUs)), select = clip.id)
+        perform(TrimClip(clip.id, clip.sourceInUs, clip.sourceAtOffsetUs(at - clip.timelineStartUs)), select = clip.id)
     }
 
     fun commitTrim(clipId: String, newIn: Long, newOut: Long) {

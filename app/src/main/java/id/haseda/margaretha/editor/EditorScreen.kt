@@ -195,7 +195,8 @@ fun EditorScreen(vm: EditorViewModel, onClose: () -> Unit) {
         .focusRequester(focus)
         .focusTarget()
         .onKeyEvent { e ->
-            if (e.type != KeyEventType.KeyDown || panel == Panel.TEXT) return@onKeyEvent false
+            // Panels with a text field keep the keys for typing.
+            if (e.type != KeyEventType.KeyDown || panel == Panel.TEXT || panel == Panel.MEDIA) return@onKeyEvent false
             when {
                 e.key == Key.Spacebar -> vm.togglePlay()
                 e.isCtrlPressed && e.key == Key.Z && e.isShiftPressed -> vm.redo()
@@ -281,6 +282,7 @@ fun EditorScreen(vm: EditorViewModel, onClose: () -> Unit) {
                         selectedClipId = state.selectedClipId,
                         selectedTextId = state.selectedTextId,
                         cache = vm.thumbnails,
+                        waveforms = vm.waveforms,
                         onScrub = vm::scrubTo,
                         onSelect = { id ->
                             vm.select(id)

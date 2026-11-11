@@ -63,7 +63,7 @@ class ThumbnailCache(private val context: Context) {
             stills += uri
             return decodeStill(uri, heightPx)
         }
-        return pooled.lock.withLock {
+        val frame = pooled.lock.withLock {
             runCatching {
                 val r = pooled.retriever
                 if (Build.VERSION.SDK_INT >= 27) {
@@ -77,6 +77,8 @@ class ThumbnailCache(private val context: Context) {
                 }
             }.getOrNull()
         }
+        // Some image formats open in the retriever but yield no frame; decode those as stills.
+        return frame ?: decodeStill(uri, heightPx)?.also { stills += uri }
     }
 
     private suspend fun retrieverFor(uri: String): PooledRetriever? = poolLock.withLock {

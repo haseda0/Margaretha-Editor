@@ -30,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -56,6 +57,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import id.haseda.margaretha.media.ThumbnailCache
+import id.haseda.margaretha.media.WaveformCache
 import id.haseda.margaretha.timeline.Clip
 import id.haseda.margaretha.timeline.Edit
 import id.haseda.margaretha.timeline.EditOutcome
@@ -90,14 +92,26 @@ private val ROW_GAP = 4.dp
 private enum class DragMode { MOVE, START, END }
 
 /** A clip or text shown as a bar on one of the free rows under the main track. */
-private data class RowItem(val id: String, val startUs: Long, val endUs: Long, val label: String, val isText: Boolean)
+private data class RowItem(
+    val id: String,
+    val startUs: Long,
+    val endUs: Long,
+    val label: String,
+    val isText: Boolean,
+    /** Audio bars only: where the sound comes from, for the waveform. */
+    val uri: String? = null,
+    val sourceInUs: Long = 0L,
+)
 
 private fun freeRows(project: Project): List<Track> =
     project.tracks.filter { it.kind != TrackKind.MAIN_VIDEO && (it.clips.isNotEmpty() || it.texts.isNotEmpty()) }
 
 private fun rowItems(project: Project, track: Track): List<RowItem> =
     if (track.isTextual) track.texts.map { RowItem(it.id, it.startUs, it.endUs, it.text.lineSequence().first(), true) }
-    else track.clips.map { RowItem(it.id, it.timelineStartUs, it.timelineEndUs, project.assets[it.assetId]?.displayName.orEmpty(), false) }
+    else track.clips.map {
+        val asset = project.assets[it.assetId]
+        RowItem(it.id, it.timelineStartUs, it.timelineEndUs, asset?.displayName.orEmpty(), false, asset?.uri, it.sourceInUs)
+    }
 
 private fun rowColor(track: Track): Color = when {
     track.kind == TrackKind.TEXT -> MColors.TrackText
@@ -143,6 +157,7 @@ fun TimelineView(
     selectedClipId: String?,
     selectedTextId: String?,
     cache: ThumbnailCache,
+    waveforms: WaveformCache,
     onScrub: (timeUs: Long, final: Boolean) -> Unit,
     onSelect: (String?) -> Unit,
     onSelectText: (String?) -> Unit,
@@ -441,6 +456,7 @@ fun TimelineView(
                             .border(if (selected) 2.dp else 1.dp, if (selected) MColors.Accent else color.copy(alpha = 0.6f), shape),
                         contentAlignment = Alignment.CenterStart,
                     ) {
+                        if (item.uri != null) Waveform(waveforms, item.uri, item.sourceInUs, pxPerUs, firstVisiblePx = (-x).coerceAtLeast(0f), lastVisiblePx = (widthPx - x).coerceAtMost(w), color = color)
                         if (w > with(density) { 28.dp.toPx() }) {
                             Text(
                                 item.label,
@@ -479,6 +495,25 @@ fun TimelineView(
                 size = Size(10.dp.toPx(), 7.dp.toPx()),
                 cornerRadius = CornerRadius(2.dp.toPx()),
             )
+        }
+    }
+}
+
+/** Peak bars of an audio clip; only the part on screen is drawn. Empty until the file is decoded. */
+@Composable
+private fun Waveform(cache: WaveformCache, uri: String, sourceInUs: Long, pxPerUs: Float, firstVisiblePx: Float, lastVisiblePx: Float, color: Color) {
+    val peaks by produceState(initialValue = cache.peek(uri), uri) { if (value == null) value = cache.get(uri) }
+    val data = peaks ?: return
+    Canvas(Modifier.fillMaxSize()) {
+        val step = 3.dp.toPx()
+        val mid = size.height / 2f
+        var px = floor(firstVisiblePx / step) * step
+        while (px < lastVisiblePx) {
+            val bucket = ((sourceInUs + (px / pxPerUs).toLong()) / WaveformCache.BUCKET_US).toInt()
+            val peak = data.getOrNull(bucket) ?: 0f
+            val half = (peak * mid * 0.9f).coerceAtLeast(0.5.dp.toPx())
+            drawLine(color.copy(alpha = 0.85f), Offset(px + step / 2f, mid - half), Offset(px + step / 2f, mid + half), strokeWidth = 1.5.dp.toPx())
+            px += step
         }
     }
 }

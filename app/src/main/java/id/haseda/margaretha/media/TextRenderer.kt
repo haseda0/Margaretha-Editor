@@ -153,7 +153,7 @@ private class TextLayerOverlay(
     override fun getBitmap(presentationTimeUs: Long): Bitmap {
         val item = active(presentationTimeUs)
         if (item?.id != currentId) {
-            if (current !== blank) current.recycle()
+            // The previous bitmap is left to the garbage collector: the overlay may still compare against it.
             current = if (item == null) blank else TextRenderer.render(item, size.width, size.height)
             currentId = item?.id
         }

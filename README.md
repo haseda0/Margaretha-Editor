@@ -3,9 +3,11 @@
 Editor video Android native, pribadi, offline-first. Tanpa akun, tanpa iklan, tanpa watermark.
 Spesifikasi induk: *AURELIA Video Studio — Master Build Specification v1.0* (nama produk diganti menjadi **Margaretha Editor**).
 
-## Status: Phase 1 + Color Studio foundation
+## Status: 2.0 Studio
 
-`IMPORT → PREVIEW → TRIM → SPLIT → COLOR LOOKS → COMBINE → EXPORT → PLAY EXPORTED MP4`
+`IMPOR (video/foto/audio) → POTONG → KECEPATAN/POSISI → WARNA & EFEK → TRANSISI → MUSIK → TEKS/SUBTITLE → EKSPOR MP4`
+
+Kode lulus tes JVM dan dibangun CI, tetapi belum diuji di perangkat fisik — lihat [HANDOFF.md](HANDOFF.md).
 
 Lihat [FEATURE_STATUS.md](FEATURE_STATUS.md) untuk status jujur tiap fitur.
 
@@ -16,6 +18,7 @@ Kebutuhan: JDK 17+, Android SDK (compileSdk 36). Gradle wrapper 9.4.0 sudah dise
 ```bash
 ./gradlew :core:timeline:test          # tes mesin timeline (JVM murni, cepat)
 ./gradlew :app:assembleRelease         # APK → app/build/outputs/apk/release/app-release.apk
+node tools/shader-test/run.js          # kompilasi + uji piksel shader GLSL di WebGL headless (butuh Playwright)
 ```
 
 CI GitHub Actions (`.github/workflows/build.yml`) menjalankan tes, membangun APK debug + release,

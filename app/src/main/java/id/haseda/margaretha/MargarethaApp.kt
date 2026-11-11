@@ -7,6 +7,7 @@ import id.haseda.margaretha.data.AppSettings
 import id.haseda.margaretha.data.ProjectRepository
 import id.haseda.margaretha.media.MediaProbe
 import id.haseda.margaretha.media.ThumbnailCache
+import id.haseda.margaretha.media.WaveformCache
 
 /** Manual dependency container — the graph is small enough that a DI framework is not justified. */
 class AppContainer(context: Context) {
@@ -14,6 +15,7 @@ class AppContainer(context: Context) {
     val probe = MediaProbe(context)
     val thumbnails = ThumbnailCache(context)
     val settings = AppSettings(context)
+    val waveforms = WaveformCache(context)
 }
 
 class MargarethaApp : Application() {
@@ -29,6 +31,9 @@ class MargarethaApp : Application() {
     @Suppress("DEPRECATION")
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) container.thumbnails.trim()
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) {
+            container.thumbnails.trim()
+            container.waveforms.trim()
+        }
     }
 }
