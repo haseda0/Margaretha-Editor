@@ -3,7 +3,7 @@
 Editor video Android native, pribadi, offline-first. Tanpa akun, tanpa iklan, tanpa watermark.
 Spesifikasi induk: *AURELIA Video Studio — Master Build Specification v1.0* (nama produk diganti menjadi **Margaretha Editor**).
 
-## Status: 2.0 Studio
+## Status: 2.1 Studio
 
 `IMPOR (video/foto/audio) → POTONG → KECEPATAN/POSISI → WARNA & EFEK → TRANSISI → MUSIK → TEKS/SUBTITLE → EKSPOR MP4`
 
@@ -36,5 +36,5 @@ core/timeline/    Mesin timeline Kotlin murni: model µs, perintah edit, undo/re
 docs/             Pipeline render, timeline, export, format proyek
 ```
 
-Dokumen: [ARCHITECTURE](ARCHITECTURE.md) · [ROADMAP](ROADMAP.md) · [DEPENDENCIES](DEPENDENCIES.md) ·
+Dokumen: [PROJECT_AUDIT](PROJECT_AUDIT.md) · [IMPLEMENTATION_PLAN](IMPLEMENTATION_PLAN.md) · [RISK_REGISTER](RISK_REGISTER.md) · [HANDOFF](HANDOFF.md) · [backend](backend/README.md) · [ARCHITECTURE](ARCHITECTURE.md) · [ROADMAP](ROADMAP.md) · [DEPENDENCIES](DEPENDENCIES.md) ·
 [LICENSES](LICENSES.md) · [TESTING](TESTING.md) · [CHANGELOG](CHANGELOG.md)

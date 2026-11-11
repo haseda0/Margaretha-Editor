@@ -1,7 +1,7 @@
 # Pengujian
 
 ## Otomatis (JVM) — `./gradlew :core:timeline:test`
-65 tes. Hasil harus selalu diambil dari eksekusi saat ini atau CI; jumlah tes bukan bukti bahwa APK terbaru berfungsi.
+72 tes. Hasil harus selalu diambil dari eksekusi saat ini atau CI; jumlah tes bukan bukti bahwa APK terbaru berfungsi.
 - **TimelineEngineTest (17)**, **EditorSessionTest (3)**, **ProjectCodecTest (7)**, **ExportPlannerTest (7)**: perilaku Phase 1 (tata letak, belah, trim, ripple, undo/redo, codec, rencana ekspor).
 - **SpeedTest (4)**: durasi & ripple setelah ubah kecepatan, belah pada klip dipercepat memotong frame sumber yang benar, batas kecepatan, segmen render.
 - **ImageClipTest (1)**: durasi awal foto dan perpanjangan lewat trim.
@@ -11,6 +11,7 @@
 - **SrtTest (3)**: file SRT berantakan (BOM, CRLF, tanpa indeks, tag, tanpa baris kosong), blok rusak dilewati, format bolak-balik.
 - **MotionTest (3)**: kurva fade, status transisi, pose animasi teks.
 - **RenderStructureTest (4)**: klip tanpa edit tidak memakai GPU, tiap edit hanya menyalakan tahap yang perlu, ubah nilai tidak mengubah struktur, lapisan teks tidak pernah bertumpuk.
+- **KeyframeTest (7)**: interpolasi & tahan di luar rentang, ganti keyframe berdekatan, pose sisa setelah hapus, gerak tetap menempel pada gambar setelah trim/belah/ubah kecepatan, bolak-balik field v4 + migrasi v3, kanvas kustom, ganti media.
 - **StudioCodecTest (3)**: semua field baru bolak-balik, migrasi v2 → v3, file tidak konsisten ditolak.
 
 ## Shader — `node tools/shader-test/run.js`
@@ -18,8 +19,12 @@ Mengompilasi file GLSL yang sama dengan yang dipakai aplikasi di Chromium headle
 netral = identitas, arah tiap kontrol grading, vignette, grain, tajamkan, fade, wipe masuk/keluar, opasitas, blur horizontal/vertikal, semua uniform aktif.
 Ini membuktikan shader benar secara bahasa dan matematika; **bukan** bukti berjalan di GPU HP tertentu.
 
+## Desain — `cd tools/ui-shot && gradle shot -Pout=out`
+Mengompilasi file UI murni aplikasi (`Tokens`, `MIcons`, `Components`, `Tactile`) di Compose Desktop dan merendernya ke PNG.
+Dipakai untuk kritik visual kontrol taktil; bukan pengganti uji di layar HP.
+
 ## CI
-Workflow GitHub Actions: tes JVM → `assembleDebug` + `assembleRelease` + `lintDebug` → artifact debug/release APK dan laporan lint.
+Workflow GitHub Actions: tes JVM → `assembleDebug` + `assembleRelease` + `bundleRelease` + `lintDebug` → verifikasi tanda tangan (`apksigner`), manifest (`aapt2`), isi dex/shader, checksum → artifact APK debug/release, AAB, laporan lint, hasil tes.
 
 ## Manual di perangkat (wajib sebelum Phase 1 dinyatakan selesai)
 | # | Skenario | Hasil |
@@ -45,4 +50,12 @@ Workflow GitHub Actions: tes JVM → `assembleDebug` + `assembleRelease` + `lint
 | 18 | Foto di antara video, kanvas 9:16 | belum |
 | 19 | Posisi/skala/rotasi/potong tepi | belum |
 | 20 | Proyek v2 lama dibuka di versi ini | belum |
+| 21 | Keyframe: klip bergerak di pratinjau dan hasil ekspor sama | belum |
+| 22 | Pilih folder (SD/USB), ekspor ke sana, cabut penyimpanan lalu ekspor lagi (jatuh ke Galeri) | belum |
+| 23 | Cadangkan proyek, hapus, pulihkan dari file, tautkan ulang media | belum |
+| 24 | Rekam suara: izin, rekam, muncul di trek suara, terdengar di ekspor | belum |
+| 25 | Akun: daftar → verifikasi email → masuk → ganti nama → keluar → proyek tetap ada | belum (butuh backend) |
+| 26 | Lupa kata sandi lewat tautan email di HP | belum (butuh backend) |
+| 27 | Dua akun di satu HP: proyek akun A tidak tampil untuk akun B | belum (butuh backend) |
+| 28 | Knob, fader, roda jog: rasa gestur dan haptik | belum |
 Setelah export: putar hasil di aplikasi, cek durasi = timeline, audio sinkron, rasio benar.

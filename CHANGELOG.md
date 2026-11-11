@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.1.0-studio — 2026-11-11
+### Ditambahkan
+- **Akun** (Supabase Auth): daftar, masuk, verifikasi email, pemulihan kata sandi lewat tautan `margaretha://auth`, profil, ganti email/kata sandi, hapus akun; sesi terenkripsi dengan kunci Android Keystore; proyek ditandai pemiliknya. Tanpa konfigurasi backend aplikasi berjalan mode lokal.
+- **Penyimpanan pilihan pengguna** (Storage Access Framework): folder untuk ekspor dan cadangan (internal, SD, USB OTG), deteksi izin hilang, cadangan per proyek/semua, pulihkan tanpa menimpa, cadangan otomatis, riwayat ekspor.
+- **Keyframe** posisi/skala/rotasi/opasitas (disimpan dalam waktu sumber), intensitas look, rotasi & opasitas teks, kanvas ukuran kustom, ganti media klip, preset kualitas Draf (skema proyek v4).
+- **Kontrol taktil**: knob putar, roda jog per-frame, fader alur, saklar fisik, penampil timecode, tombol timbul dengan keadaan ditekan.
+- Rekam suara (voice-over), onboarding, layar pengaturan lengkap, cari & urutkan proyek.
+- CI: AAB release, verifikasi tanda tangan dan isi APK/AAB, secret opsional untuk backend dan keystore.
+
+### Diubah
+- Aplikasi sekarang meminta izin INTERNET (hanya untuk akun) dan RECORD_AUDIO (hanya saat merekam).
+
 ## 2.0.0-studio — 2026-11-11
 ### Ditambahkan
 - **Mesin timeline v3** (skema proyek v3, migrasi otomatis dari v1/v2): kecepatan klip 0,25×–4×, posisi/skala/rotasi/flip/opasitas, potong tepi, color grading 10 kontrol, efek (blur, tajamkan, vignette, grain), transisi masuk/keluar (fade, slide, zoom, wipe, blur), fade audio, klip foto, dua trek audio bebas, trek teks dan subtitle, kunci/sembunyikan trek, ubah kanvas, impor/ekspor SRT.
