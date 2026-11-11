@@ -11,14 +11,11 @@ import android.os.StatFs
 import android.provider.MediaStore
 import androidx.annotation.OptIn
 import androidx.core.content.FileProvider
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
-import androidx.media3.common.audio.AudioProcessor
-import androidx.media3.common.audio.ChannelMixingAudioProcessor
-import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.Presentation
-import id.haseda.margaretha.media.colorEffects
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EditedMediaItem
@@ -164,36 +161,46 @@ class ExportEngine(private val context: Context, private val scope: CoroutineSco
 
     private fun buildComposition(plan: ExportPlan): Composition {
         val presentation = Presentation.createForWidthAndHeight(plan.size.width, plan.size.height, Presentation.LAYOUT_SCALE_TO_FIT)
+        val canvasAspect = plan.size.width.toFloat() / plan.size.height
+        val textLayers = TextOverlays.layers(plan.render.texts)
         val items = plan.segments.map { s ->
-            val mediaItem = MediaItem.Builder()
-                .setUri(s.uri)
-                .setClippingConfiguration(
-                    MediaItem.ClippingConfiguration.Builder()
-                        .setStartPositionMs(s.startMs)
-                        .setEndPositionMs(s.endMs)
-                        .build(),
-                )
-                .build()
-            val audio: List<AudioProcessor> = if (s.volume < 1f) listOf(volumeProcessor(s.volume)) else emptyList()
-            EditedMediaItem.Builder(mediaItem)
+            // One clock per item: every time-based effect of the clip measures from its first frame.
+            val clock = FrameClock()
+            val video = StudioEffects.build(StudioEffects.structure(s), { s }, canvasAspect, clock, presentation) +
+                listOfNotNull(TextOverlays.effect(textLayers, s.timelineStartUs, s.durationUs, plan.size, clock))
+            val audio = AudioFx.chain(s.volume, s.durationUs, s.audioFadeInUs, s.audioFadeOutUs)
+            val builder = EditedMediaItem.Builder(s.toMediaItem())
                 .setFrameRate(plan.frameRate)
-                .setEffects(Effects(audio, colorEffects(s.colorLook) + presentation))
-                .build()
+                .setEffects(Effects(audio, video))
+            if (s.speedPermille != 1000) builder.setSpeed(AudioFx.constantSpeed(s.speed))
+            builder.build()
         }
         // Audio+video track types: clips without sound contribute silence, keeping A/V in sync.
-        val sequence = EditedMediaItemSequence.withAudioAndVideoFrom(items)
-        return Composition.Builder(sequence)
+        val main = EditedMediaItemSequence.withAudioAndVideoFrom(items)
+        val audioTracks = plan.render.audioTracks.map { track ->
+            val sequence = EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO))
+            var cursor = 0L
+            track.forEach { a ->
+                if (a.timelineStartUs > cursor) sequence.addGap(a.timelineStartUs - cursor)
+                val mediaItem = MediaItem.Builder()
+                    .setUri(a.uri)
+                    .setClippingConfiguration(
+                        MediaItem.ClippingConfiguration.Builder().setStartPositionMs(a.startMs).setEndPositionMs(a.endMs).build(),
+                    )
+                    .build()
+                sequence.addItem(
+                    EditedMediaItem.Builder(mediaItem)
+                        .setRemoveVideo(true)
+                        .setEffects(Effects(AudioFx.chain(a.volume, a.durationUs, a.fadeInUs, a.fadeOutUs), emptyList()))
+                        .build(),
+                )
+                cursor = a.timelineEndUs
+            }
+            sequence.build()
+        }
+        return Composition.Builder(listOf(main) + audioTracks)
             .setHdrMode(Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL)
             .build()
-    }
-
-    /**
-     * Gain stage: mono/stereo keep their layout (identity matrix scaled by the clip volume);
-     * 3–6 channel sources are downmixed to stereo at constant power, then scaled.
-     */
-    private fun volumeProcessor(volume: Float): AudioProcessor = ChannelMixingAudioProcessor().apply {
-        for (channels in 1..2) putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(channels, channels).scaleBy(volume))
-        for (channels in 3..6) putChannelMixingMatrix(ChannelMixingMatrix.createForConstantPower(channels, 2).scaleBy(volume))
     }
 
     private suspend fun finish(file: File, plan: ExportPlan, baseName: String, startedAt: Long) {

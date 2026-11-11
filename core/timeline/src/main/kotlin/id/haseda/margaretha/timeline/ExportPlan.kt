@@ -27,6 +27,8 @@ data class RenderSegment(
     val fx: ClipFx = ClipFx.NONE,
     val enter: Transition = Transition.NONE,
     val exit: Transition = Transition.NONE,
+    /** Needed by players to recognise still images behind extension-less content URIs. */
+    val mimeType: String = "",
 ) {
     /** Rendered duration, after the speed change. */
     val durationUs: Long get() = (endMs - startMs) * US_PER_MS * 1000L / speedPermille
@@ -91,6 +93,7 @@ object RenderSegments {
                 fx = clip.fx,
                 enter = clip.enter,
                 exit = clip.exit,
+                mimeType = asset.mimeType,
             ).also { cursor += it.durationUs }
         }
     }

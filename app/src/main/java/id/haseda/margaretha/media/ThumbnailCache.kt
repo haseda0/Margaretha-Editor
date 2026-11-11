@@ -2,6 +2,7 @@ package id.haseda.margaretha.media
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
@@ -44,8 +45,24 @@ class ThumbnailCache(private val context: Context) {
         }
     }
 
+    /** Sources the frame retriever could not open; they are decoded as still images instead. */
+    private val stills = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    private fun decodeStill(uri: String, heightPx: Int): Bitmap? = runCatching {
+        val parsed = Uri.parse(uri)
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(parsed)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        if (bounds.outHeight <= 0) return@runCatching null
+        val options = BitmapFactory.Options().apply { inSampleSize = Integer.highestOneBit((bounds.outHeight / heightPx).coerceAtLeast(1)) }
+        context.contentResolver.openInputStream(parsed)?.use { BitmapFactory.decodeStream(it, null, options) }
+    }.getOrNull()
+
     private suspend fun decode(uri: String, timeUs: Long, heightPx: Int): Bitmap? {
-        val pooled = retrieverFor(uri) ?: return null
+        if (uri in stills) return decodeStill(uri, heightPx)
+        val pooled = retrieverFor(uri) ?: run {
+            stills += uri
+            return decodeStill(uri, heightPx)
+        }
         return pooled.lock.withLock {
             runCatching {
                 val r = pooled.retriever

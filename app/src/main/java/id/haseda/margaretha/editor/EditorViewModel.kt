@@ -10,11 +10,26 @@ import id.haseda.margaretha.media.CodecSupport
 import id.haseda.margaretha.media.ExportEngine
 import id.haseda.margaretha.media.PreviewController
 import id.haseda.margaretha.media.ProbeResult
+import id.haseda.margaretha.timeline.AddAssets
+import id.haseda.margaretha.timeline.AddAudioClip
 import id.haseda.margaretha.timeline.AddClips
+import id.haseda.margaretha.timeline.AddText
+import id.haseda.margaretha.timeline.Canvas
 import id.haseda.margaretha.timeline.Clip
 import id.haseda.margaretha.timeline.ColorLook
 import id.haseda.margaretha.timeline.DeleteClips
+import id.haseda.margaretha.timeline.DeleteTexts
 import id.haseda.margaretha.timeline.DuplicateClip
+import id.haseda.margaretha.timeline.ImportSubtitles
+import id.haseda.margaretha.timeline.MediaKind
+import id.haseda.margaretha.timeline.RemoveAsset
+import id.haseda.margaretha.timeline.SetCanvas
+import id.haseda.margaretha.timeline.SetTrackFlags
+import id.haseda.margaretha.timeline.Srt
+import id.haseda.margaretha.timeline.TextItem
+import id.haseda.margaretha.timeline.TextStyle
+import id.haseda.margaretha.timeline.TrackKind
+import id.haseda.margaretha.timeline.UpdateText
 import id.haseda.margaretha.timeline.Edit
 import id.haseda.margaretha.timeline.EditOutcome
 import id.haseda.margaretha.timeline.EditorSession
@@ -34,6 +49,7 @@ import id.haseda.margaretha.timeline.SplitClip
 import id.haseda.margaretha.timeline.TimelineEngine
 import id.haseda.margaretha.timeline.TrimClip
 import id.haseda.margaretha.timeline.VideoCodec
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -56,6 +72,7 @@ data class EditorUiState(
     val loadError: String? = null,
     val project: Project? = null,
     val selectedClipId: String? = null,
+    val selectedTextId: String? = null,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
     val undoLabel: String? = null,
@@ -145,6 +162,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         pendingImports = emptyList()
         export.reset()
         preview.clear()
+        preview.bypassEffects = false
+        draftEdit = null
         val p = session?.project
         session = null
         _state.value = EditorUiState()
@@ -173,6 +192,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun perform(edit: Edit, select: String? = _state.value.selectedClipId, toastOnSuccess: String? = null): Boolean {
         val s = session ?: return false
+        draftEdit = null
         return when (val outcome = s.perform(edit, System.currentTimeMillis())) {
             is EditOutcome.Applied -> {
                 publish(selected = select)
@@ -189,6 +209,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun undo() {
         val s = session ?: return
+        draftEdit = null
         val label = s.undo() ?: return
         publish(selected = _state.value.selectedClipId?.takeIf { s.project.findClip(it) != null })
         scheduleSave()
@@ -197,13 +218,49 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun redo() {
         val s = session ?: return
+        draftEdit = null
         val label = s.redo() ?: return
         publish(selected = _state.value.selectedClipId?.takeIf { s.project.findClip(it) != null })
         scheduleSave()
         toast("Diulang: $label")
     }
 
-    fun select(clipId: String?) = _state.update { it.copy(selectedClipId = clipId) }
+    fun select(clipId: String?) = _state.update { it.copy(selectedClipId = clipId, selectedTextId = null) }
+
+    fun selectText(textId: String?) = _state.update { it.copy(selectedTextId = textId, selectedClipId = null) }
+
+    /** Runs any engine command as one undoable step (used by timeline drags and panels). */
+    fun apply(edit: Edit): Boolean = perform(edit)
+
+    // ---- Live drafts: sliders preview a change without flooding the undo history ----------------
+
+    private var draftEdit: Edit? = null
+
+    /** Shows [edit] in the preview and UI without recording it. Call [commitDraft] on release. */
+    fun draft(edit: Edit) {
+        val s = session ?: return
+        val outcome = TimelineEngine.apply(s.project, edit)
+        if (outcome is EditOutcome.Applied) {
+            draftEdit = edit
+            show(outcome.project)
+        } else if (draftEdit != null) {
+            // Dragged back to the starting value: nothing left to commit.
+            draftEdit = null
+            show(s.project)
+        }
+    }
+
+    fun commitDraft() {
+        val edit = draftEdit ?: return
+        draftEdit = null
+        perform(edit)
+    }
+
+    fun cancelDraft() {
+        if (draftEdit == null) return
+        draftEdit = null
+        session?.let { show(it.project) }
+    }
 
     /** Tools act on the selected clip, or on the clip under the playhead when nothing is selected. */
     private fun targetClip(): Clip? {
@@ -242,14 +299,122 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteSelected() {
+        _state.value.selectedTextId?.let { id ->
+            if (perform(DeleteTexts(setOf(id)))) _state.update { it.copy(selectedTextId = null) }
+            return
+        }
         val clip = targetClip() ?: return toast("Pilih klip yang ingin dihapus.")
         perform(DeleteClips(setOf(clip.id)), select = null)
     }
 
     fun duplicateSelected() {
+        val p = session?.project ?: return
+        _state.value.selectedTextId?.let { id ->
+            val (track, item) = p.findText(id) ?: return
+            val copy = item.copy(id = newId(), startUs = item.endUs)
+            if (perform(AddText(copy, track.id))) selectText(copy.id)
+            return
+        }
         val clip = targetClip() ?: return toast("Pilih klip dulu.")
         val id = newId()
         perform(DuplicateClip(clip.id, id), select = id)
+    }
+
+    // ---- Text & subtitles ----------------------------------------------------------------------
+
+    /** Adds a title or subtitle at the playhead and selects it for editing. */
+    fun addText(subtitle: Boolean) {
+        val p = session?.project ?: return
+        if (p.durationUs <= 0) return toast("Tambahkan video dulu, lalu beri teks.")
+        val start = preview.positionUs.value.coerceIn(0L, (p.durationUs - TextItem.MIN_US).coerceAtLeast(0L))
+        val item = TextItem(
+            id = newId(),
+            text = if (subtitle) "Subtitle" else "Teks",
+            startUs = start,
+            durationUs = minOf(if (subtitle) 2_500_000L else 3_000_000L, p.durationUs - start).coerceAtLeast(TextItem.MIN_US),
+            y = if (subtitle) TextItem.SUBTITLE_Y else 0.5f,
+            style = if (subtitle) TextStyle.SUBTITLE else TextStyle.TITLE,
+        )
+        if (perform(AddText(item, if (subtitle) Project.SUBTITLE_TRACK_ID else Project.TEXT_TRACK_ID))) selectText(item.id)
+    }
+
+    fun text(textId: String?): TextItem? = textId?.let { _state.value.project?.findText(it)?.second }
+
+    fun importSrt(uri: Uri, replace: Boolean) {
+        viewModelScope.launch {
+            val text = withContext(Dispatchers.IO) {
+                runCatching {
+                    getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
+                        // Subtitle files are tiny; refuse anything that clearly is not one.
+                        val bytes = input.readNBytesCompat(MAX_SRT_BYTES + 1)
+                        if (bytes.size > MAX_SRT_BYTES) null else bytes.toString(Charsets.UTF_8)
+                    }
+                }.getOrNull()
+            } ?: return@launch toast("File subtitle tidak bisa dibaca atau terlalu besar.")
+            val parsed = Srt.parse(text)
+            if (parsed.cues.isEmpty()) return@launch toast("Tidak ada subtitle yang terbaca. Pastikan filenya berformat .srt.")
+            val items = Srt.toTextItems(parsed.cues, parsed.cues.map { newId() })
+            val note = if (parsed.skipped > 0) " (${parsed.skipped} blok rusak dilewati)" else ""
+            perform(ImportSubtitles(items, replace), toastOnSuccess = "${items.size} subtitle diimpor$note.")
+        }
+    }
+
+    fun exportSrt(uri: Uri) {
+        val cues = Srt.fromTextItems(session?.project?.track(Project.SUBTITLE_TRACK_ID)?.texts.orEmpty())
+        if (cues.isEmpty()) return toast("Belum ada subtitle untuk diekspor.")
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    getApplication<Application>().contentResolver.openOutputStream(uri, "wt")?.use { it.write(Srt.format(cues).toByteArray(Charsets.UTF_8)) } != null
+                }.getOrDefault(false)
+            }
+            toast(if (ok) "${cues.size} subtitle disimpan sebagai .srt." else "Gagal menulis file subtitle.")
+        }
+    }
+
+    private fun java.io.InputStream.readNBytesCompat(limit: Int): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val buffer = ByteArray(16 * 1024)
+        while (out.size() < limit) {
+            val n = read(buffer, 0, minOf(buffer.size, limit - out.size()))
+            if (n < 0) break
+            out.write(buffer, 0, n)
+        }
+        return out.toByteArray()
+    }
+
+    // ---- Tracks, canvas, library ---------------------------------------------------------------
+
+    fun setTrackFlags(trackId: String, enabled: Boolean, locked: Boolean) {
+        perform(SetTrackFlags(trackId, enabled, locked))
+    }
+
+    fun setCanvas(canvas: Canvas) {
+        perform(SetCanvas(canvas))
+    }
+
+    /** Puts a library asset on the timeline: pictures after the selection, sound at the playhead. */
+    fun addAssetToTimeline(assetId: String, trackId: String = Project.MUSIC_TRACK_ID) {
+        val p = session?.project ?: return
+        val asset = p.assets[assetId] ?: return
+        val id = newId()
+        if (asset.kind == MediaKind.AUDIO) {
+            if (perform(AddAudioClip(asset, id, trackId, preview.positionUs.value), select = id)) toast("Audio ditambahkan di playhead.")
+        } else {
+            val selectedIndex = _state.value.selectedClipId?.let { p.mainTrack.indexOf(it) } ?: -1
+            perform(AddClips(listOf(asset), listOf(id), if (selectedIndex >= 0) selectedIndex + 1 else null), select = id)
+        }
+    }
+
+    /** Uses the sound of a library video as an audio clip (e.g. keep a voice, replace the picture). */
+    fun addAssetAudio(assetId: String, trackId: String) {
+        val asset = session?.project?.assets?.get(assetId) ?: return
+        val id = newId()
+        perform(AddAudioClip(asset, id, trackId, preview.positionUs.value), select = id)
+    }
+
+    fun removeAsset(assetId: String) {
+        if (perform(RemoveAsset(assetId), toastOnSuccess = "Media dihapus dari proyek.")) checkMissingMedia()
     }
 
     fun moveSelected(delta: Int) {
@@ -267,6 +432,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         perform(SetClipAudio(clipId, volume.coerceIn(0f, 1f), muted), select = clipId)
     }
 
+    /** Moves the selected clip one position (main track only; audio clips are dragged freely). */
     fun setColorLook(clipId: String, look: ColorLook) {
         perform(SetClipColorLook(clipId, look), select = clipId)
     }
@@ -277,7 +443,11 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- Media import & relink ------------------------------------------------------------------
 
-    fun importMedia(uris: List<Uri>) {
+    /**
+     * Imports picked files. Video and images go to the main track, sound to [audioTrackId];
+     * with [toLibraryOnly] everything is only added to the project's media library.
+     */
+    fun importMedia(uris: List<Uri>, audioTrackId: String = Project.MUSIC_TRACK_ID, toLibraryOnly: Boolean = false) {
         if (uris.isEmpty() || session == null) return
         _state.update { it.copy(importing = true) }
         viewModelScope.launch {
@@ -294,12 +464,24 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             val ok = results.filterIsInstance<ProbeResult.Ok>().map { it.asset }
             val failed = results.filterIsInstance<ProbeResult.Failed>()
             _state.update { it.copy(importing = false) }
-            if (ok.isNotEmpty()) {
-                val track = session?.project?.mainTrack
-                val selectedIndex = _state.value.selectedClipId?.let { track?.indexOf(it) } ?: -1
-                val insertAt = if (selectedIndex >= 0) selectedIndex + 1 else null
-                val ids = ok.map { newId() }
-                perform(AddClips(ok, ids, insertAt), select = ids.first())
+            val visual = ok.filter { it.kind != MediaKind.AUDIO }
+            val audio = ok.filter { it.kind == MediaKind.AUDIO }
+            if (toLibraryOnly) {
+                if (ok.isNotEmpty()) perform(AddAssets(ok), toastOnSuccess = "${ok.size} media masuk ke pustaka.")
+            } else {
+                if (visual.isNotEmpty()) {
+                    val track = session?.project?.mainTrack
+                    val selectedIndex = _state.value.selectedClipId?.let { track?.indexOf(it) } ?: -1
+                    val insertAt = if (selectedIndex >= 0) selectedIndex + 1 else null
+                    val ids = visual.map { newId() }
+                    perform(AddClips(visual, ids, insertAt), select = ids.first())
+                }
+                // Several sounds are laid end to end from the playhead; the engine avoids overlaps.
+                var at = preview.positionUs.value
+                audio.forEach { asset ->
+                    val id = newId()
+                    if (perform(AddAudioClip(asset, id, audioTrackId, at), select = id)) at += asset.durationUs
+                }
             }
             if (failed.isNotEmpty()) {
                 val first = failed.first()
@@ -335,6 +517,22 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     // ---- Preview -------------------------------------------------------------------------------
 
     fun togglePlay() = preview.togglePlay()
+
+    fun stop() = preview.stop()
+
+    private val _rate = MutableStateFlow(1f)
+    val rate: StateFlow<Float> = _rate.asStateFlow()
+
+    fun cycleRate() {
+        val next = RATES[(RATES.indexOf(_rate.value) + 1) % RATES.size]
+        _rate.value = next
+        preview.rate = next
+    }
+
+    /** Before/after comparison: hold to see the picture without colour work and effects. */
+    fun compareOriginal(active: Boolean) {
+        preview.bypassEffects = active
+    }
 
     fun pause() = preview.pause()
 
@@ -399,15 +597,21 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val p = s.project
         _state.update {
             it.copy(
-                project = p,
                 selectedClipId = if (resetSelection) null else selected?.takeIf { id -> p.findClip(id) != null },
+                selectedTextId = if (resetSelection) null else it.selectedTextId?.takeIf { id -> p.findText(id) != null },
                 canUndo = s.canUndo,
                 canRedo = s.canRedo,
                 undoLabel = s.undoLabel,
                 redoLabel = s.redoLabel,
             )
         }
-        preview.setSegments(RenderSegments.of(p), preview.positionUs.value.coerceAtMost(p.durationUs))
+        show(p)
+    }
+
+    /** Pushes a project snapshot (committed or draft) to the UI and the preview player. */
+    private fun show(p: Project) {
+        _state.update { it.copy(project = p) }
+        preview.setPlan(RenderSegments.plan(p), p.canvas.aspect.ratio, preview.positionUs.value.coerceAtMost(p.durationUs))
     }
 
     private fun scheduleSave() {
@@ -436,10 +640,16 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun newId() = UUID.randomUUID().toString()
 
-    /** Clip lookup helper for UI sheets. */
-    fun clip(clipId: String?): Clip? = clipId?.let { session?.project?.findClip(it)?.second }
+    /** Clip lookup helper for UI panels; reads the shown project so live drafts are reflected. */
+    fun clip(clipId: String?): Clip? = clipId?.let { _state.value.project?.findClip(it)?.second }
+
+    /** True when the clip sits on an audio track (only audio tools apply). */
+    fun isAudioClip(clipId: String?): Boolean =
+        clipId?.let { _state.value.project?.findClip(it)?.first?.kind } == TrackKind.AUDIO
 
     companion object {
         val MIN_CLIP_US = TimelineEngine.MIN_CLIP_US
+        val RATES = listOf(1f, 2f, 0.5f)
+        private const val MAX_SRT_BYTES = 2 * 1024 * 1024
     }
 }
