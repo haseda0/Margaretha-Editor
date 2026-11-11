@@ -44,7 +44,8 @@ jobs:
       - name: Validate and build
         run: |
           chmod +x gradlew
-          ./gradlew :core:timeline:test :app:assembleDebug :app:assembleRelease :app:bundleRelease :app:lintDebug --stacktrace
+          set -o pipefail
+          ./gradlew :core:timeline:test :app:assembleDebug :app:assembleRelease :app:bundleRelease :app:lintDebug 2>&1 | tee "$RUNNER_TEMP/build.log"
 
       - name: Verify artifacts
         run: |
@@ -101,3 +102,10 @@ jobs:
           name: margaretha-editor-test-results
           path: core/timeline/build/test-results/test
           if-no-files-found: warn
+
+      # Kept last so the reason for a red build is at the very end of the job log.
+      - name: Error summary
+        if: failure()
+        run: |
+          echo "==== compiler and test errors ===="
+          grep -E "^e: |^w: .*deprecat|error:|FAILED|What went wrong|> Task .* FAILED" "$RUNNER_TEMP/build.log" | grep -v "^w: " | sed -E "s#file://$GITHUB_WORKSPACE/##" | head -n 80 || true
