@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -22,6 +23,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -175,3 +178,94 @@ fun VideoFrame(cache: ThumbnailCache, uri: String?, timeUs: Long, heightDp: Dp, 
 }
 
 val SheetPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
+
+/** Small pill used for choices inside tool panels (tighter than [OptionChip]). */
+@Composable
+fun MiniChip(text: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true) {
+    val shape = RoundedCornerShape(10.dp)
+    Box(
+        modifier
+            .defaultMinSize(minWidth = 44.dp, minHeight = 36.dp)
+            .clip(shape)
+            .background(if (selected) MColors.Accent.copy(alpha = 0.16f) else MColors.Surface2)
+            .border(1.dp, if (selected) MColors.Accent else MColors.Line, shape)
+            .clickable(enabled = enabled, role = Role.RadioButton, onClick = onClick)
+            .alpha(if (enabled) 1f else 0.38f)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, style = MaterialTheme.typography.labelMedium, color = if (selected) MColors.AccentBright else MColors.Text, maxLines = 1)
+    }
+}
+
+/**
+ * Labelled slider with a live value read-out. [onChange] fires while dragging, [onDone] once on
+ * release; tapping the value resets it to [resetTo] when one is given.
+ */
+@Composable
+fun SliderRow(
+    label: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    valueText: String,
+    onChange: (Float) -> Unit,
+    onDone: () -> Unit,
+    modifier: Modifier = Modifier,
+    resetTo: Float? = null,
+) {
+    Row(modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MColors.TextMuted, modifier = Modifier.width(92.dp), maxLines = 1)
+        Slider(
+            value = value.coerceIn(range.start, range.endInclusive),
+            onValueChange = onChange,
+            onValueChangeFinished = onDone,
+            valueRange = range,
+            modifier = Modifier.weight(1f),
+            colors = SliderDefaults.colors(
+                thumbColor = MColors.AccentBright,
+                activeTrackColor = MColors.Accent,
+                inactiveTrackColor = MColors.Surface3,
+            ),
+        )
+        val changed = resetTo != null && value != resetTo
+        Text(
+            valueText,
+            style = TimecodeStyle,
+            color = if (changed) MColors.AccentBright else MColors.TextFaint,
+            textAlign = TextAlign.End,
+            maxLines = 1,
+            modifier = Modifier
+                .width(56.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(enabled = changed, onClickLabel = "Kembalikan $label ke awal") {
+                    if (resetTo != null) {
+                        onChange(resetTo)
+                        onDone()
+                    }
+                }
+                .padding(vertical = 6.dp),
+        )
+    }
+}
+
+/** Round colour swatch; the selected one gets the accent ring. */
+@Composable
+fun Swatch(color: Color, selected: Boolean, label: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .border(2.dp, if (selected) MColors.Accent else Color.Transparent, CircleShape)
+            .clickable(role = Role.RadioButton, onClickLabel = label, onClick = onClick)
+            .padding(5.dp)
+            .clip(CircleShape)
+            .background(color)
+            .border(1.dp, MColors.LineStrong, CircleShape),
+    )
+}
+
+/** Section caption inside a panel. */
+@Composable
+fun PanelLabel(text: String, modifier: Modifier = Modifier) {
+    Text(text.uppercase(), style = MaterialTheme.typography.labelSmall, color = MColors.TextFaint, modifier = modifier.padding(top = 10.dp, bottom = 4.dp))
+}

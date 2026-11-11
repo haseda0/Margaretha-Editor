@@ -38,6 +38,12 @@ object MColors {
     val Danger = Color(0xFFEB6F75)
     val Success = Color(0xFF6FCB9C)
     val Warning = Color(0xFFE9C46A)
+
+    // Timeline rows: one hue per kind of content, all at the same lightness so none shouts.
+    val TrackText = Color(0xFFE8A27A)
+    val TrackSubtitle = Color(0xFFB9A6F0)
+    val TrackMusic = Color(0xFF6FCBB8)
+    val TrackVoice = Color(0xFF7FB2F0)
 }
 
 private val scheme = darkColorScheme(

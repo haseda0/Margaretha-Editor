@@ -96,8 +96,8 @@ class ProjectRepository(context: Context) {
         }
     }
 
-    suspend fun create(name: String, aspect: AspectRatio, nowMs: Long): Project {
-        val project = Project.create(UUID.randomUUID().toString(), name, Canvas(aspect), nowMs)
+    suspend fun create(name: String, aspect: AspectRatio, nowMs: Long, frameRate: Int = 30): Project {
+        val project = Project.create(UUID.randomUUID().toString(), name, Canvas(aspect, frameRate), nowMs)
         save(project)
         return project
     }
@@ -140,7 +140,7 @@ class ProjectRepository(context: Context) {
             clipCount = clipCount,
             aspect = canvas.aspect,
             coverUri = first?.let { assets[it.assetId]?.uri },
-            coverTimeUs = first?.let { it.sourceInUs + minOf(it.durationUs / 3, 1_000_000L) } ?: 0L,
+            coverTimeUs = first?.let { it.sourceInUs + minOf(it.sourceDurationUs / 3, 1_000_000L) } ?: 0L,
         )
     }
 

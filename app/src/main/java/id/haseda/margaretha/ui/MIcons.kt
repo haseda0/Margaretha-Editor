@@ -64,4 +64,28 @@ object MIcons {
     val Link = icon("link", strokes = listOf("M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1", "M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"))
     val Sparkle = icon("sparkle", fills = listOf("M12 2.8l1.9 5.3 5.3 1.9-5.3 1.9L12 17.2l-1.9-5.3L4.8 10l5.3-1.9z", "M18.5 15.5l0.8 2.2 2.2 0.8-2.2 0.8-0.8 2.2-0.8-2.2-2.2-0.8 2.2-0.8z"))
     val Warning = icon("warning", strokes = listOf("M12 4 2.8 19.5h18.4z", "M12 10v4.5", "M12 17.2v0.1"))
+    val Text = icon("text", strokes = listOf("M5 6.5V4.5h14v2", "M12 4.5v15", "M9 19.5h6"))
+    val Music = icon("music", strokes = listOf("M9 17.5V5.5l10-2v12", "M3.5 17.5a2.75 2.75 0 1 0 5.5 0a2.75 2.75 0 1 0-5.5 0", "M13.5 15.5a2.75 2.75 0 1 0 5.5 0a2.75 2.75 0 1 0-5.5 0"))
+    val Subtitle = icon("subtitle", strokes = listOf("M4 5.5h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1z", "M6.5 14.5h4", "M13 14.5h4.5", "M6.5 11h7"))
+    val Effects = icon("effects", strokes = listOf("M4.5 19.5 14.5 9.5", "M14 5v-2", "M19 10h2", "M17.5 6.5 19 5", "M17.5 13.5 19 15", "M10.5 6.5 9 5"))
+    val Palette = icon(
+        "palette",
+        strokes = listOf("M12 3.5a8.5 8.5 0 1 0 0 17c1.2 0 1.8-0.9 1.5-1.9-0.4-1.3 0.4-2.6 1.9-2.6H17a3.5 3.5 0 0 0 3.5-3.5c0-5-3.8-9-8.5-9z"),
+        fills = listOf("M7 11.5a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0", "M10.3 7.6a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0", "M14.6 8.6a1.2 1.2 0 1 0 2.4 0a1.2 1.2 0 1 0-2.4 0"),
+    )
+    val Speed = icon("speed", strokes = listOf("M4.5 17a8.5 8.5 0 1 1 15 0", "M12 14.5l4.5-5.5"))
+    val Transform = icon("transform", strokes = listOf("M6.5 3v12.5a2 2 0 0 0 2 2H21", "M3 6.5h12.5a2 2 0 0 1 2 2V21"))
+    val Library = icon("library", strokes = listOf("M4 4h6.5v6.5H4z", "M13.5 4H20v6.5h-6.5z", "M4 13.5h6.5V20H4z", "M13.5 13.5H20V20h-6.5z"))
+    val Lock = icon("lock", strokes = listOf("M7.5 11V8a4.5 4.5 0 0 1 9 0v3", "M6 11h12a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z"))
+    val Eye = icon("eye", strokes = listOf("M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z", "M9.5 12a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0-5 0"))
+    val EyeOff = icon("eye_off", strokes = listOf("M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12z", "M4 4l16 16"))
+    val Fullscreen = icon("fullscreen", strokes = listOf("M4 9V4h5", "M20 9V4h-5", "M4 15v5h5", "M20 15v5h-5"))
+    val Stop = icon("stop", fills = listOf("M6.5 6.5h11v11h-11z"))
+    val Settings = icon("settings", strokes = listOf("M4 7h9.5", "M18 7h2", "M4 17h3.5", "M12 17h8", "M13.5 7a2.2 2.2 0 1 0 4.4 0a2.2 2.2 0 1 0-4.4 0", "M7.5 17a2.2 2.2 0 1 0 4.4 0a2.2 2.2 0 1 0-4.4 0"))
+    val Compare = icon("compare", strokes = listOf("M12 3v18", "M9 6H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h4", "M15 6h4a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-4"))
+    val Layers = icon("layers", strokes = listOf("M12 4 3.5 8.5 12 13l8.5-4.5z", "M3.5 12.5 12 17l8.5-4.5"))
+    val Transition = icon("transition", strokes = listOf("M4 6.5v11l7-5.5z", "M20 6.5v11l-7-5.5z"))
+    val Image = icon("image", strokes = listOf("M5 4.5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1z", "M4.5 16l4.5-4.5 4 4 2.5-2.5 4 4", "M14 9a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0"))
+    val Reset = icon("reset", strokes = listOf("M4.5 12a7.5 7.5 0 1 0 2.4-5.5", "M4.5 4.5v4.5H9"))
+    val Canvas = icon("canvas", strokes = listOf("M7 3.5h10a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1z", "M2.5 8v8", "M21.5 8v8"))
 }

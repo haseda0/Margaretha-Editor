@@ -428,11 +428,6 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setAudio(clipId: String, volume: Float, muted: Boolean) {
-        perform(SetClipAudio(clipId, volume.coerceIn(0f, 1f), muted), select = clipId)
-    }
-
-    /** Moves the selected clip one position (main track only; audio clips are dragged freely). */
     fun setColorLook(clipId: String, look: ColorLook) {
         perform(SetClipColorLook(clipId, look), select = clipId)
     }

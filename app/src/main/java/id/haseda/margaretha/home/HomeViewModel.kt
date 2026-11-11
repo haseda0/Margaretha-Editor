@@ -10,11 +10,13 @@ import id.haseda.margaretha.timeline.AspectRatio
 import id.haseda.margaretha.timeline.EditOutcome
 import id.haseda.margaretha.timeline.RenameProject
 import id.haseda.margaretha.timeline.TimelineEngine
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class HomeUiState(
     val loading: Boolean = true,
@@ -26,6 +28,20 @@ data class HomeUiState(
 class HomeViewModel(app: Application) : AndroidViewModel(app) {
     private val repository = (app as MargarethaApp).container.repository
     val thumbnails = (app as MargarethaApp).container.thumbnails
+    val settings = (app as MargarethaApp).container.settings
+
+    /** Bytes held by re-creatable files (leftover renders, decoded caches). Never project data. */
+    suspend fun cacheBytes(): Long = withContext(Dispatchers.IO) {
+        getApplication<Application>().cacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+    }
+
+    suspend fun clearCache() {
+        thumbnails.trim()
+        withContext(Dispatchers.IO) {
+            getApplication<Application>().cacheDir.listFiles().orEmpty().forEach { it.deleteRecursively() }
+        }
+        _state.update { it.copy(message = "Cache dibersihkan. Proyek dan media tidak tersentuh.") }
+    }
 
     private val _state = MutableStateFlow(HomeUiState())
     val state: StateFlow<HomeUiState> = _state.asStateFlow()
@@ -52,7 +68,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     suspend fun create(name: String, aspect: AspectRatio): String? = runCatching {
-        repository.create(name.trim().ifEmpty { "Proyek baru" }.take(TimelineEngine.MAX_NAME_LENGTH), aspect, System.currentTimeMillis()).id
+        repository.create(name.trim().ifEmpty { "Proyek baru" }.take(TimelineEngine.MAX_NAME_LENGTH), aspect, System.currentTimeMillis(), settings.defaultFrameRate).id
     }.getOrElse {
         _state.update { s -> s.copy(message = "Gagal membuat proyek: ${it.message}") }
         null

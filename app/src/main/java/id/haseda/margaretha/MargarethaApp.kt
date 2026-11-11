@@ -3,6 +3,7 @@ package id.haseda.margaretha
 import android.app.Application
 import android.content.ComponentCallbacks2
 import android.content.Context
+import id.haseda.margaretha.data.AppSettings
 import id.haseda.margaretha.data.ProjectRepository
 import id.haseda.margaretha.media.MediaProbe
 import id.haseda.margaretha.media.ThumbnailCache
@@ -12,6 +13,7 @@ class AppContainer(context: Context) {
     val repository = ProjectRepository(context)
     val probe = MediaProbe(context)
     val thumbnails = ThumbnailCache(context)
+    val settings = AppSettings(context)
 }
 
 class MargarethaApp : Application() {

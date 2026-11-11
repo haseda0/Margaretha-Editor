@@ -83,6 +83,7 @@ fun HomeScreen(vm: HomeViewModel, onOpen: (String, List<Uri>) -> Unit) {
     var showNew by rememberSaveable { mutableStateOf(false) }
     var pendingName by rememberSaveable { mutableStateOf("") }
     var pendingAspect by rememberSaveable { mutableStateOf(AspectRatio.PORTRAIT_9_16) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(maxItems = 30)) { uris ->
         if (uris.isNotEmpty()) {
@@ -115,7 +116,7 @@ fun HomeScreen(vm: HomeViewModel, onOpen: (String, List<Uri>) -> Unit) {
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            item { Header() }
+            item { Header(onSettings = { showSettings = true }) }
             state.recoverable?.let { rec ->
                 item {
                     RecoveryBanner(rec, onResume = { onOpen(rec.id, emptyList()) }, onDismiss = vm::dismissRecovery)
@@ -170,21 +171,73 @@ fun HomeScreen(vm: HomeViewModel, onOpen: (String, List<Uri>) -> Unit) {
             onDismiss = { showNew = false },
             onPick = {
                 showNew = false
-                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+                picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
             },
         )
     }
+    if (showSettings) SettingsDialog(vm) { showSettings = false }
+}
+
+@Composable
+private fun SettingsDialog(vm: HomeViewModel, onDismiss: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var fps by remember { mutableStateOf(vm.settings.defaultFrameRate) }
+    var cacheBytes by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(Unit) { cacheBytes = vm.cacheBytes() }
+    val version = remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "-" }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MColors.Surface2,
+        title = { Text("Pengaturan") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("FRAME RATE PROYEK BARU", style = MaterialTheme.typography.labelSmall, color = MColors.TextFaint)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    id.haseda.margaretha.data.AppSettings.FRAME_RATES.forEach { f ->
+                        id.haseda.margaretha.ui.MiniChip("$f", fps == f, {
+                            fps = f
+                            vm.settings.defaultFrameRate = f
+                        })
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("PENYIMPANAN", style = MaterialTheme.typography.labelSmall, color = MColors.TextFaint)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Cache: " + (cacheBytes?.let { Timecode.bytes(it) } ?: "menghitung…"),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MColors.Text,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = {
+                        scope.launch {
+                            vm.clearCache()
+                            cacheBytes = vm.cacheBytes()
+                        }
+                    }) { Text("Bersihkan", color = MColors.Accent) }
+                }
+                Text("Hanya file sementara yang dihapus. Proyek, media, dan hasil ekspor aman.", style = MaterialTheme.typography.bodySmall, color = MColors.TextFaint)
+                Spacer(Modifier.height(8.dp))
+                Text("TENTANG", style = MaterialTheme.typography.labelSmall, color = MColors.TextFaint)
+                Text("Margaretha Editor $version", style = MaterialTheme.typography.bodyMedium, color = MColors.Text)
+                Text("Bekerja sepenuhnya offline. Tanpa akun, tanpa iklan, tanpa watermark.", style = MaterialTheme.typography.bodySmall, color = MColors.TextFaint)
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Selesai", color = MColors.Accent) } },
+    )
 }
 
 private fun defaultName(): String = "Proyek " + SimpleDateFormat("d MMM, HH.mm", Locale.forLanguageTag("id-ID")).format(Date())
 
 @Composable
-private fun Header() {
+private fun Header(onSettings: () -> Unit) {
     Column(Modifier.padding(start = 4.dp, bottom = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(MIcons.Sparkle, contentDescription = null, tint = MColors.Accent, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
-            Text("EDITOR", style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 3.sp), color = MColors.Accent)
+            Text("EDITOR", style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 3.sp), color = MColors.Accent, modifier = Modifier.weight(1f))
+            id.haseda.margaretha.ui.IconAction(MIcons.Settings, "Pengaturan", onSettings, tint = MColors.TextMuted)
         }
         Spacer(Modifier.height(4.dp))
         Text("Margaretha", style = MaterialTheme.typography.displaySmall, color = MColors.Text)
