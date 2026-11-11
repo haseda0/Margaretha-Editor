@@ -278,6 +278,8 @@ fun EditorScreen(vm: EditorViewModel, onClose: () -> Unit) {
                 val transport: @Composable () -> Unit = {
                     Transport(
                         project, position, playing, rate, fullscreen,
+                        // An open panel needs the room more than the wheel does; the preview stays large.
+                        showJog = !fullscreen && panel == Panel.NONE,
                         onToggle = vm::togglePlay,
                         onStop = vm::stop,
                         onStep = vm::stepFrames,
@@ -631,6 +633,7 @@ private fun Transport(
     playing: Boolean,
     rate: Float,
     fullscreen: Boolean,
+    showJog: Boolean,
     onToggle: () -> Unit,
     onStop: () -> Unit,
     onStep: (Int) -> Unit,
@@ -665,7 +668,7 @@ private fun Transport(
             }
         }
         // Frame-accurate jog: one rib of the wheel is one frame.
-        if (!fullscreen) JogWheel(onStep, Modifier.padding(top = 4.dp, bottom = 2.dp), enabled = project.mainTrack.clips.isNotEmpty())
+        if (showJog) JogWheel(onStep, Modifier.padding(top = 4.dp, bottom = 2.dp), enabled = project.mainTrack.clips.isNotEmpty())
     }
 }
 

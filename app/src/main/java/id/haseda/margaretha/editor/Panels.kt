@@ -126,7 +126,7 @@ fun PanelFrame(
         Column(
             Modifier
                 .fillMaxWidth()
-                .heightIn(max = 236.dp)
+                .heightIn(max = 216.dp)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 10.dp),
