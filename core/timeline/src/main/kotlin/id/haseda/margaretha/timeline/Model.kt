@@ -9,6 +9,8 @@ package id.haseda.margaretha.timeline
 const val US_PER_MS = 1_000L
 const val US_PER_SECOND = 1_000_000L
 
+enum class MediaKind { VIDEO, IMAGE, AUDIO }
+
 /** A source media file referenced by a project. Originals are never modified. */
 data class MediaAsset(
     val id: String,
@@ -24,6 +26,7 @@ data class MediaAsset(
     val hasAudio: Boolean,
     /** Nominal frame rate if known, otherwise 0. */
     val frameRate: Float = 0f,
+    val kind: MediaKind = MediaKind.VIDEO,
 ) {
     /** Width as the viewer sees it, after rotation metadata is applied. */
     val displayWidth: Int get() = if (rotationDegrees % 180 != 0) height else width
@@ -32,12 +35,119 @@ data class MediaAsset(
     val displayHeight: Int get() = if (rotationDegrees % 180 != 0) width else height
 }
 
+/** Geometric placement of a clip inside the output frame. Offsets are fractions of the frame. */
+data class Transform(
+    val scale: Float = 1f,
+    val rotation: Float = 0f,
+    val offsetX: Float = 0f,
+    val offsetY: Float = 0f,
+    val flipH: Boolean = false,
+    val flipV: Boolean = false,
+    val opacity: Float = 1f,
+) {
+    init {
+        require(scale in MIN_SCALE..MAX_SCALE) { "scale out of range" }
+        require(rotation in -360f..360f) { "rotation out of range" }
+        require(offsetX in -1f..1f && offsetY in -1f..1f) { "offset out of range" }
+        require(opacity in 0f..1f) { "opacity out of range" }
+    }
+
+    val isIdentity: Boolean get() = this == IDENTITY
+
+    companion object {
+        const val MIN_SCALE = 0.1f
+        const val MAX_SCALE = 5f
+        val IDENTITY = Transform()
+    }
+}
+
+/** Fractions (0..MAX) removed from each side of the source picture. */
+data class Crop(val left: Float = 0f, val top: Float = 0f, val right: Float = 0f, val bottom: Float = 0f) {
+    init {
+        require(listOf(left, top, right, bottom).all { it in 0f..MAX }) { "crop out of range" }
+        require(left + right <= MAX_TOTAL && top + bottom <= MAX_TOTAL) { "crop removes too much" }
+    }
+
+    val isNone: Boolean get() = this == NONE
+
+    companion object {
+        const val MAX = 0.45f
+        const val MAX_TOTAL = 0.9f
+        val NONE = Crop()
+    }
+}
+
+/** Manual colour grade. Every control is -1..1 with 0 meaning "unchanged". */
+data class ColorGrade(
+    val exposure: Float = 0f,
+    val brightness: Float = 0f,
+    val contrast: Float = 0f,
+    val saturation: Float = 0f,
+    val temperature: Float = 0f,
+    val tint: Float = 0f,
+    val highlights: Float = 0f,
+    val shadows: Float = 0f,
+    val whites: Float = 0f,
+    val blacks: Float = 0f,
+) {
+    init {
+        require(values().all { it in -1f..1f }) { "grade value out of range" }
+    }
+
+    fun values(): List<Float> = listOf(exposure, brightness, contrast, saturation, temperature, tint, highlights, shadows, whites, blacks)
+
+    val isNeutral: Boolean get() = this == NEUTRAL
+
+    companion object {
+        val NEUTRAL = ColorGrade()
+    }
+}
+
+/** Stylising filters. Every control is 0..1 with 0 meaning "off". */
+data class ClipFx(val blur: Float = 0f, val sharpen: Float = 0f, val vignette: Float = 0f, val grain: Float = 0f) {
+    init {
+        require(listOf(blur, sharpen, vignette, grain).all { it in 0f..1f }) { "effect value out of range" }
+    }
+
+    val isNone: Boolean get() = this == NONE
+
+    companion object {
+        val NONE = ClipFx()
+    }
+}
+
+/**
+ * How a clip appears/disappears. Transitions animate against black (or the neighbouring clip's
+ * own transition); they are rendered identically in preview and export.
+ */
+enum class TransitionKind(val title: String) {
+    NONE("Tanpa"),
+    FADE("Fade"),
+    SLIDE("Slide"),
+    ZOOM("Zoom"),
+    WIPE("Wipe"),
+    BLUR("Blur"),
+}
+
+data class Transition(val kind: TransitionKind = TransitionKind.NONE, val durationUs: Long = DEFAULT_US) {
+    init {
+        require(durationUs in MIN_US..MAX_US) { "transition duration out of range" }
+    }
+
+    val isNone: Boolean get() = kind == TransitionKind.NONE
+
+    companion object {
+        const val MIN_US = 100_000L
+        const val MAX_US = 3_000_000L
+        const val DEFAULT_US = 500_000L
+        val NONE = Transition()
+    }
+}
+
 /**
  * A non-destructive reference to a section of a [MediaAsset].
  *
- * Schema v1 deliberately contains only properties that the preview AND export pipelines render.
- * Speed, transform, crop, effect stack and keyframes are added in later schema versions together
- * with their rendering implementation (see docs/TIMELINE_ENGINE.md).
+ * Every property here is rendered by both the preview and the export pipeline.
  */
 data class Clip(
     val id: String,
@@ -49,21 +159,45 @@ data class Clip(
     val volume: Float = 1f,
     val muted: Boolean = false,
     val colorLook: ColorLook = ColorLook.ORIGINAL,
+    /** Playback speed in thousandths (1000 = normal). Integer so durations never drift. */
+    val speedPermille: Int = 1000,
+    val audioFadeInUs: Long = 0L,
+    val audioFadeOutUs: Long = 0L,
+    val transform: Transform = Transform.IDENTITY,
+    val crop: Crop = Crop.NONE,
+    val grade: ColorGrade = ColorGrade.NEUTRAL,
+    val fx: ClipFx = ClipFx.NONE,
+    val enter: Transition = Transition.NONE,
+    val exit: Transition = Transition.NONE,
 ) {
     init {
         require(sourceInUs >= 0) { "sourceInUs must be >= 0" }
         require(sourceOutUs > sourceInUs) { "sourceOutUs must be > sourceInUs" }
         require(timelineStartUs >= 0) { "timelineStartUs must be >= 0" }
         require(volume in 0f..1f) { "volume must be within 0..1" }
+        require(speedPermille in MIN_SPEED..MAX_SPEED) { "speed out of range" }
+        require(audioFadeInUs >= 0 && audioFadeOutUs >= 0) { "fade must be >= 0" }
     }
 
-    val durationUs: Long get() = sourceOutUs - sourceInUs
+    val sourceDurationUs: Long get() = sourceOutUs - sourceInUs
+
+    /** Duration on the timeline, after the speed change. */
+    val durationUs: Long get() = sourceDurationUs * 1000L / speedPermille
     val timelineEndUs: Long get() = timelineStartUs + durationUs
+    val speed: Float get() = speedPermille / 1000f
 
     /** Gain actually rendered, combining mute and volume. */
     val effectiveVolume: Float get() = if (muted) 0f else volume
 
     fun containsTimelineUs(timeUs: Long): Boolean = timeUs >= timelineStartUs && timeUs < timelineEndUs
+
+    /** Source time shown at a timeline offset inside this clip. */
+    fun sourceAtOffsetUs(offsetUs: Long): Long = sourceInUs + offsetUs * speedPermille / 1000L
+
+    companion object {
+        const val MIN_SPEED = 250
+        const val MAX_SPEED = 4000
+    }
 }
 
 /** Real-time color looks supported by both Media3 preview and MP4 export. */
@@ -77,23 +211,99 @@ enum class ColorLook(val title: String, val hue: Float, val saturation: Float, v
     MONOCHROME("B&W", 0f, -100f, 0f, 0.12f, true),
 }
 
-enum class TrackKind { MAIN_VIDEO, OVERLAY_VIDEO, AUDIO, TEXT }
+enum class TrackKind { MAIN_VIDEO, OVERLAY_VIDEO, AUDIO, TEXT, SUBTITLE }
+
+enum class FontChoice(val title: String) { SANS("Sans"), SERIF("Serif"), MONO("Mono"), CONDENSED("Condensed"), ROUNDED("Rounded") }
+
+enum class TextAlign { LEFT, CENTER, RIGHT }
+
+enum class TextAnimation(val title: String) { NONE("Tanpa"), FADE("Fade"), SLIDE_UP("Naik"), POP("Pop") }
+
+/** Colours are 0xAARRGGBB. Sizes are relative to the frame so every resolution looks the same. */
+data class TextStyle(
+    val font: FontChoice = FontChoice.SANS,
+    /** Text height as a fraction of the frame height. */
+    val size: Float = 0.06f,
+    val bold: Boolean = true,
+    val italic: Boolean = false,
+    val color: Long = 0xFFFFFFFF,
+    val align: TextAlign = TextAlign.CENTER,
+    val strokeColor: Long = 0xFF000000,
+    /** Outline thickness as a fraction of the text size (0 = none). */
+    val strokeWidth: Float = 0f,
+    /** Drop shadow strength 0..1. */
+    val shadow: Float = 0.5f,
+    /** Background plate colour; alpha 0 means no plate. */
+    val backgroundColor: Long = 0x00000000,
+) {
+    init {
+        require(size in MIN_SIZE..MAX_SIZE) { "text size out of range" }
+        require(strokeWidth in 0f..0.3f) { "stroke out of range" }
+        require(shadow in 0f..1f) { "shadow out of range" }
+        require(listOf(color, strokeColor, backgroundColor).all { it in 0L..0xFFFFFFFFL }) { "colour out of range" }
+    }
+
+    companion object {
+        const val MIN_SIZE = 0.02f
+        const val MAX_SIZE = 0.3f
+        val TITLE = TextStyle()
+        val SUBTITLE = TextStyle(size = 0.045f, bold = false, shadow = 0.3f, backgroundColor = 0x99000000)
+    }
+}
+
+/** A title or subtitle. [x]/[y] are the centre of the text block as fractions of the frame. */
+data class TextItem(
+    val id: String,
+    val text: String,
+    val startUs: Long,
+    val durationUs: Long,
+    val x: Float = 0.5f,
+    val y: Float = 0.5f,
+    val style: TextStyle = TextStyle.TITLE,
+    val animation: TextAnimation = TextAnimation.NONE,
+) {
+    init {
+        require(startUs >= 0) { "startUs must be >= 0" }
+        require(durationUs >= MIN_US) { "text too short" }
+        require(x in 0f..1f && y in 0f..1f) { "text position out of range" }
+    }
+
+    val endUs: Long get() = startUs + durationUs
+
+    fun containsUs(timeUs: Long): Boolean = timeUs >= startUs && timeUs < endUs
+
+    companion object {
+        const val MIN_US = 100_000L
+        const val MAX_LENGTH = 500
+        const val SUBTITLE_Y = 0.86f
+    }
+}
 
 /**
- * A track of clips. A magnetic track keeps its clips contiguous starting at 0: positions are
- * derived from order, so deleting a clip ripples the following clips left.
+ * A track of clips (or of text items for TEXT/SUBTITLE tracks). A magnetic track keeps its clips
+ * contiguous starting at 0: positions are derived from order, so deleting a clip ripples the
+ * following clips left. Free (non-magnetic) tracks keep explicit positions.
  */
 data class Track(
     val id: String,
     val kind: TrackKind,
     val clips: List<Clip>,
     val magnetic: Boolean,
+    val texts: List<TextItem> = emptyList(),
+    /** Disabled audio tracks are silent; disabled text tracks are hidden. */
+    val enabled: Boolean = true,
+    /** Locked tracks reject every edit. */
+    val locked: Boolean = false,
 ) {
-    val endUs: Long get() = clips.maxOfOrNull { it.timelineEndUs } ?: 0L
+    val endUs: Long get() = maxOf(clips.maxOfOrNull { it.timelineEndUs } ?: 0L, texts.maxOfOrNull { it.endUs } ?: 0L)
+
+    val isTextual: Boolean get() = kind == TrackKind.TEXT || kind == TrackKind.SUBTITLE
 
     fun indexOf(clipId: String): Int = clips.indexOfFirst { it.id == clipId }
 
     fun clip(clipId: String): Clip? = clips.firstOrNull { it.id == clipId }
+
+    fun text(textId: String): TextItem? = texts.firstOrNull { it.id == textId }
 
     /** Clip under [timeUs]; at the exact end of the track the last clip is returned. */
     fun clipAt(timeUs: Long): Clip? = locate(timeUs)?.clip
@@ -115,9 +325,9 @@ data class Track(
         }
     }
 
-    /** Re-derives contiguous positions for magnetic tracks. */
+    /** Re-derives contiguous positions for magnetic tracks; sorts free tracks by start time. */
     fun normalized(): Track {
-        if (!magnetic) return copy(clips = clips.sortedBy { it.timelineStartUs })
+        if (!magnetic) return copy(clips = clips.sortedBy { it.timelineStartUs }, texts = texts.sortedBy { it.startUs })
         var cursor = 0L
         val laidOut = clips.map { clip ->
             val placed = if (clip.timelineStartUs == cursor) clip else clip.copy(timelineStartUs = cursor)
@@ -125,6 +335,11 @@ data class Track(
             placed
         }
         return copy(clips = laidOut)
+    }
+
+    /** True when [candidate] would overlap another clip of this (free) track. */
+    fun overlaps(candidate: Clip): Boolean = clips.any {
+        it.id != candidate.id && candidate.timelineStartUs < it.timelineEndUs && it.timelineStartUs < candidate.timelineEndUs
     }
 }
 
@@ -162,9 +377,26 @@ data class Project(
         get() = tracks.firstOrNull { it.kind == TrackKind.MAIN_VIDEO }
             ?: error("Project has no main video track")
 
-    val durationUs: Long get() = tracks.maxOfOrNull { it.endUs } ?: 0L
+    /** Programme length: the main video track defines it; other tracks are cut to fit. */
+    val durationUs: Long get() = mainTrack.endUs
 
     val clipCount: Int get() = tracks.sumOf { it.clips.size }
+
+    val audioTracks: List<Track> get() = tracks.filter { it.kind == TrackKind.AUDIO }
+
+    fun track(trackId: String): Track? = tracks.firstOrNull { it.id == trackId }
+
+    fun findText(textId: String): Pair<Track, TextItem>? {
+        for (track in tracks) {
+            val item = track.text(textId)
+            if (item != null) return track to item
+        }
+        return null
+    }
+
+    /** Text items visible at [timeUs] on enabled tracks, titles first then subtitles. */
+    fun textsAt(timeUs: Long): List<TextItem> =
+        tracks.filter { it.isTextual && it.enabled }.flatMap { t -> t.texts.filter { it.containsUs(timeUs) } }
 
     fun findClip(clipId: String): Pair<Track, Clip>? {
         for (track in tracks) {
@@ -179,6 +411,18 @@ data class Project(
 
     companion object {
         const val MAIN_TRACK_ID = "track-main"
+        const val MUSIC_TRACK_ID = "track-music"
+        const val VOICE_TRACK_ID = "track-voice"
+        const val TEXT_TRACK_ID = "track-text"
+        const val SUBTITLE_TRACK_ID = "track-subtitle"
+
+        /** Free tracks are created on first use; this is their fixed stacking order. */
+        val FREE_TRACKS: List<Pair<String, TrackKind>> = listOf(
+            TEXT_TRACK_ID to TrackKind.TEXT,
+            SUBTITLE_TRACK_ID to TrackKind.SUBTITLE,
+            MUSIC_TRACK_ID to TrackKind.AUDIO,
+            VOICE_TRACK_ID to TrackKind.AUDIO,
+        )
 
         fun create(id: String, name: String, canvas: Canvas, nowMs: Long): Project = Project(
             id = id,
