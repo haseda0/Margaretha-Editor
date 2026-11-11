@@ -22,6 +22,11 @@ data class ProjectSummary(
     val durationUs: Long,
     val clipCount: Int,
     val aspect: AspectRatio,
+    /** Shape and label of the canvas, which may be a custom size rather than the preset. */
+    val ratio: Float,
+    val canvasLabel: String,
+    val frameRate: Int,
+    val ownerId: String,
     val coverUri: String?,
     val coverTimeUs: Long,
 )
@@ -48,14 +53,50 @@ class ProjectRepository(context: Context) {
     private fun backup(id: String) = File(dir(id), "$FILE.bak")
     private fun temp(id: String) = File(dir(id), "$FILE.tmp")
 
-    suspend fun list(): List<ProjectSummary> = withContext(Dispatchers.IO) {
+    /**
+     * Projects visible to [ownerId]: the account's own projects plus unowned (local) ones.
+     * Another account's projects stay on disk but are never listed.
+     */
+    suspend fun list(ownerId: String = ""): List<ProjectSummary> = withContext(Dispatchers.IO) {
         root.listFiles().orEmpty().filter { it.isDirectory }.mapNotNull { d ->
             when (val r = loadBlocking(d.name)) {
-                is LoadResult.Loaded -> r.project.toSummary()
+                is LoadResult.Loaded -> r.project.toSummary().takeIf { it.ownerId.isEmpty() || it.ownerId == ownerId }
                 is LoadResult.Failed -> null
             }
         }.sortedByDescending { it.updatedAtMs }
     }
+
+    /** True when [ownerId] may open the project (own or unowned). */
+    fun mayOpen(project: Project, ownerId: String): Boolean = project.ownerId.isEmpty() || project.ownerId == ownerId
+
+    /**
+     * Imports a project file (backup). The file is validated by the codec; a project whose id
+     * already exists here is imported as a copy so nothing is overwritten.
+     */
+    suspend fun importProject(text: String, ownerId: String, nowMs: Long): LoadResult = when (val decoded = ProjectCodec.decode(text)) {
+        is ProjectCodec.DecodeResult.Failure -> LoadResult.Failed(decoded.reason)
+        is ProjectCodec.DecodeResult.Success -> {
+            val exists = withContext(Dispatchers.IO) { main(decoded.project.id).exists() }
+            val project = decoded.project.copy(
+                id = if (exists) UUID.randomUUID().toString() else decoded.project.id,
+                name = if (exists) (decoded.project.name + " (dipulihkan)").take(80) else decoded.project.name,
+                ownerId = ownerId,
+                updatedAtMs = nowMs,
+            )
+            save(project)
+            LoadResult.Loaded(project, recoveredFromBackup = false)
+        }
+    }
+
+    /** Every project of [ownerId] as (file name, project file text), for backups. */
+    suspend fun exportAll(ownerId: String): List<Pair<String, String>> = withContext(Dispatchers.IO) {
+        root.listFiles().orEmpty().filter { it.isDirectory }.mapNotNull { d ->
+            (loadBlocking(d.name) as? LoadResult.Loaded)?.project?.takeIf { mayOpen(it, ownerId) }?.let { backupName(it) to ProjectCodec.encode(it) }
+        }
+    }
+
+    fun backupName(project: Project): String =
+        project.name.replace(Regex("[^\\p{L}\\p{N} _-]"), "").trim().replace(' ', '_').ifEmpty { "Proyek" }.take(40) + "_" + project.id.take(8) + BACKUP_EXTENSION
 
     suspend fun load(id: String): LoadResult = withContext(Dispatchers.IO) { mutex.withLock { loadBlocking(id) } }
 
@@ -96,8 +137,8 @@ class ProjectRepository(context: Context) {
         }
     }
 
-    suspend fun create(name: String, aspect: AspectRatio, nowMs: Long, frameRate: Int = 30): Project {
-        val project = Project.create(UUID.randomUUID().toString(), name, Canvas(aspect, frameRate), nowMs)
+    suspend fun create(name: String, aspect: AspectRatio, nowMs: Long, frameRate: Int = 30, ownerId: String = ""): Project {
+        val project = Project.create(UUID.randomUUID().toString(), name, Canvas(aspect, frameRate), nowMs, ownerId)
         save(project)
         return project
     }
@@ -139,6 +180,10 @@ class ProjectRepository(context: Context) {
             durationUs = durationUs,
             clipCount = clipCount,
             aspect = canvas.aspect,
+            ratio = canvas.ratio,
+            canvasLabel = canvas.label,
+            frameRate = canvas.frameRate,
+            ownerId = ownerId,
             coverUri = first?.let { assets[it.assetId]?.uri },
             coverTimeUs = first?.let { it.sourceInUs + minOf(it.sourceDurationUs / 3, 1_000_000L) } ?: 0L,
         )
@@ -148,5 +193,6 @@ class ProjectRepository(context: Context) {
         private const val TAG = "ProjectRepository"
         private const val FILE = "project.json"
         private const val KEY_OPEN = "open_project"
+        const val BACKUP_EXTENSION = ".margaretha.json"
     }
 }

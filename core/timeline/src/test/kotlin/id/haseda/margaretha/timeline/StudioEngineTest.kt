@@ -427,3 +427,107 @@ class RenderStructureTest {
         assertTrue(RenderPlan(emptyList(), emptyList(), emptyList(), 0L).textLayers().isEmpty())
     }
 }
+
+class KeyframeTest {
+    private val left = Transform(offsetX = -0.5f, scale = 1f)
+    private val right = Transform(offsetX = 0.5f, scale = 2f, opacity = 0.5f)
+
+    private fun animated() = projectWith(4.0)
+        .applyOk(SetKeyframe("c0", 1_000_000L, left))
+        .applyOk(SetKeyframe("c0", 3_000_000L, right))
+
+    private fun Project.rejects(edit: Edit): String = (TimelineEngine.apply(this, edit) as EditOutcome.Rejected).reason
+
+    @Test
+    fun poseIsHeldOutsideAndInterpolatedBetweenKeyframes() {
+        val clip = animated().mainTrack.clips[0]
+        assertEquals(left, clip.transformAtOffsetUs(0L))
+        assertEquals(left, clip.transformAtOffsetUs(1_000_000L))
+        val mid = clip.transformAtOffsetUs(2_000_000L)
+        assertEquals(0f, mid.offsetX, 1e-4f)
+        assertEquals(1.5f, mid.scale, 1e-4f)
+        assertEquals(0.75f, mid.opacity, 1e-4f)
+        assertEquals(right, clip.transformAtOffsetUs(4_000_000L))
+        // No keyframes: the static transform is used everywhere.
+        assertEquals(Transform.IDENTITY, projectWith(4.0).mainTrack.clips[0].transformAtOffsetUs(2_000_000L))
+    }
+
+    @Test
+    fun settingNearAnExistingKeyframeReplacesIt() {
+        val p = animated().applyOk(SetKeyframe("c0", 1_010_000L, right))
+        assertEquals(2, p.mainTrack.clips[0].keyframes.size)
+        assertEquals(right, p.mainTrack.clips[0].keyframes[0].transform)
+        animated().rejects(SetKeyframe("c0", 9_000_000L, left))
+        animated().rejects(RemoveKeyframe("c0", 2_000_000L))
+    }
+
+    @Test
+    fun removingAndClearingLeaveASensibleRestPose() {
+        val one = animated().applyOk(RemoveKeyframe("c0", 3_000_000L))
+        assertEquals(1, one.mainTrack.clips[0].keyframes.size)
+        val none = one.applyOk(RemoveKeyframe("c0", 1_000_000L))
+        assertTrue(none.mainTrack.clips[0].keyframes.isEmpty())
+        assertEquals(left, none.mainTrack.clips[0].transform)
+        val cleared = animated().applyOk(ClearKeyframes("c0", 2_000_000L)).mainTrack.clips[0]
+        assertTrue(cleared.keyframes.isEmpty())
+        assertEquals(0f, cleared.transform.offsetX, 1e-4f)
+    }
+
+    @Test
+    fun motionStaysGluedToThePictureThroughTrimSplitAndSpeed() {
+        val base = animated()
+        val before = base.mainTrack.clips[0].transformAtOffsetUs(2_000_000L)
+        // Trim 0.5 s off the head: the same picture is now 0.5 s earlier on the timeline.
+        val trimmed = base.applyOk(TrimClip("c0", 500_000L, 4_000_000L)).mainTrack.clips[0]
+        assertEquals(before, trimmed.transformAtOffsetUs(1_500_000L))
+        // Split in the middle of the move: both halves continue the same motion.
+        val (a, b) = base.applyOk(SplitClip("c0", 2_000_000L, "c0b")).mainTrack.clips
+        assertEquals(before, a.transformAtOffsetUs(2_000_000L))
+        assertEquals(before, b.transformAtOffsetUs(0L))
+        assertEquals(right, b.transformAtOffsetUs(1_000_000L))
+        // At 2x the picture from source 2.0 s is shown at 1.0 s.
+        val fast = base.applyOk(SetClipSpeed("c0", 2000)).mainTrack.clips[0]
+        assertEquals(before, fast.transformAtOffsetUs(1_000_000L))
+        // The render segment evaluates the same pose.
+        val seg = RenderSegments.of(base.applyOk(SetClipSpeed("c0", 2000))).single()
+        assertEquals(before, seg.transformAt(1_000_000L))
+        assertTrue(EffectStructure.of(seg).matrix && EffectStructure.of(seg).grade)
+    }
+
+    @Test
+    fun keyframesAndNewFieldsRoundTripAndV3Migrates() {
+        val p = animated()
+            .applyOk(SetClipColorLook("c0", ColorLook.WARM, 0.4f))
+            .applyOk(AddText(TextItem("t", "Hai", 0L, 1_000_000L, rotation = -30f, opacity = 0.6f), Project.TEXT_TRACK_ID))
+            .applyOk(SetCanvas(Canvas(AspectRatio.LANDSCAPE_16_9, 30, 1000, 500)))
+            .copy(ownerId = "user-1")
+        assertEquals(p, (ProjectCodec.decode(ProjectCodec.encode(p)) as ProjectCodec.DecodeResult.Success).project)
+        val v3 = ProjectCodec.encode(projectWith(2.0)).replace("\"schemaVersion\":4", "\"schemaVersion\":3").replace("\"ownerId\":\"\",", "")
+        val old = (ProjectCodec.decode(v3) as ProjectCodec.DecodeResult.Success).project
+        assertEquals("", old.ownerId)
+        assertEquals(1f, old.mainTrack.clips[0].lookIntensity)
+    }
+
+    @Test
+    fun customCanvasDecidesTheOutputShape() {
+        assertEquals(OutputSize(2160, 1080), ExportPlanner.outputSize(Canvas(AspectRatio.SQUARE_1_1, 30, 1000, 500), ResolutionPreset.P1080))
+        assertEquals(OutputSize(720, 960), ExportPlanner.outputSize(Canvas(AspectRatio.SQUARE_1_1, 30, 900, 1200), ResolutionPreset.P720))
+        assertEquals(2f, Canvas(AspectRatio.SQUARE_1_1, 30, 1000, 500).ratio)
+        assertTrue(runCatching { Canvas(AspectRatio.SQUARE_1_1, 30, 10, 500) }.isFailure)
+        assertTrue(runCatching { Canvas(AspectRatio.SQUARE_1_1, 30, 500, 0) }.isFailure)
+    }
+
+    @Test
+    fun replaceMediaKeepsTimelineLengthAndEdits() {
+        val p = projectWith(4.0, 2.0).applyOk(SetClipGrade("c0", ColorGrade(contrast = 0.3f))).applyOk(TrimClip("c0", 1_000_000L, 3_000_000L))
+        val replaced = p.applyOk(ReplaceClipMedia("c0", asset("new", 10.0)))
+        val clip = replaced.mainTrack.clips[0]
+        assertEquals("new", clip.assetId)
+        assertEquals(2_000_000L, clip.durationUs)
+        assertEquals(0L, clip.sourceInUs)
+        assertEquals(0.3f, clip.grade.contrast)
+        assertEquals(2_000_000L, replaced.mainTrack.clips[1].timelineStartUs)
+        assertTrue(p.rejects(ReplaceClipMedia("c0", asset("short", 1.0))).contains("lebih pendek"))
+        p.rejects(ReplaceClipMedia("c0", p.assets["a0"]!!))
+    }
+}

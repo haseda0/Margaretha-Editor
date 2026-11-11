@@ -1,0 +1,6 @@
+# Copy to backend.properties (untracked) or set the same names as environment variables with the
+# MARGARETHA_ prefix (MARGARETHA_SUPABASE_URL, MARGARETHA_SUPABASE_ANON_KEY) in CI.
+# Only the project URL and the publishable (anon) key belong here. Never put the service_role key
+# in the app: it bypasses Row Level Security.
+SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
+SUPABASE_ANON_KEY=YOUR-PUBLISHABLE-OR-ANON-KEY

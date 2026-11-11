@@ -159,7 +159,9 @@ private class TextLayerOverlay(
         return StaticOverlaySettings.Builder()
             .setBackgroundFrameAnchor(x, y)
             .setScale(pose.scale, pose.scale)
-            .setAlphaScale(pose.alpha)
+            // The overlay API rotates counter-clockwise; the model stores clockwise degrees.
+            .setRotationDegrees(-item.rotation)
+            .setAlphaScale(pose.alpha * item.opacity)
             .build()
     }
 }

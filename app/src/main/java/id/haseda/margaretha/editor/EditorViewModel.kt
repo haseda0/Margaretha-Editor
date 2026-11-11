@@ -10,6 +10,11 @@ import id.haseda.margaretha.media.CodecSupport
 import id.haseda.margaretha.media.ExportEngine
 import id.haseda.margaretha.media.PreviewController
 import id.haseda.margaretha.media.ProbeResult
+import id.haseda.margaretha.media.VoiceRecorder
+import id.haseda.margaretha.data.UserStorage
+import id.haseda.margaretha.timeline.Keyframes
+import id.haseda.margaretha.timeline.ProjectCodec
+import id.haseda.margaretha.timeline.ReplaceClipMedia
 import id.haseda.margaretha.timeline.AddAssets
 import id.haseda.margaretha.timeline.AddAudioClip
 import id.haseda.margaretha.timeline.AddClips
@@ -101,7 +106,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private val probe = container.probe
 
     val preview = PreviewController(app, viewModelScope)
-    val export = ExportEngine(app, viewModelScope)
+    val export = ExportEngine(app, viewModelScope, container.settings, container.storage, container.exportHistory)
     val thumbnails = container.thumbnails
     val waveforms = container.waveforms
 
@@ -143,6 +148,10 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 is LoadResult.Failed -> _state.value = EditorUiState(loading = false, loadError = r.reason)
                 is LoadResult.Loaded -> {
                     if (currentId != projectId) return@launch
+                    if (!repository.mayOpen(r.project, container.account.ownerId)) {
+                        _state.value = EditorUiState(loading = false, loadError = "Proyek ini milik akun lain. Masuk dengan akun pemiliknya untuk membukanya.")
+                        return@launch
+                    }
                     session = EditorSession(r.project)
                     repository.markSessionOpen(projectId)
                     publish(resetSelection = true)
@@ -165,16 +174,90 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         preview.clear()
         preview.bypassEffects = false
         draftEdit = null
+        stopVoiceOver(keep = false)
         val p = session?.project
         session = null
         _state.value = EditorUiState()
         viewModelScope.launch {
             withContext(NonCancellable) {
                 saveJob?.cancel()
-                if (p != null) runCatching { repository.save(p) }
+                if (p != null) {
+                    runCatching { repository.save(p) }
+                    if (container.settings.autoBackup) backupToFolder(p)
+                }
                 repository.clearSession()
             }
         }
+    }
+
+    /** Mirrors the project file into the user's folder. Failures are silent here; Settings shows the folder state. */
+    private suspend fun backupToFolder(p: Project) = withContext(Dispatchers.IO) {
+        runCatching {
+            container.storage.write(listOf(UserStorage.PROJECTS), repository.backupName(p), "application/json") {
+                it.write(ProjectCodec.encode(p).toByteArray(Charsets.UTF_8))
+            }
+        }
+    }
+
+    // ---- Voice-over ----------------------------------------------------------------------------
+
+    private val recorder = VoiceRecorder(app)
+    private val _recording = MutableStateFlow(false)
+    val recording: StateFlow<Boolean> = _recording.asStateFlow()
+    private var recordAtUs = 0L
+
+    val recordedMs: Long get() = recorder.elapsedMs
+
+    /** Starts a voice-over at the playhead. The preview is paused so it does not leak into the take. */
+    fun startVoiceOver() {
+        if (session == null) return
+        preview.pause()
+        recordAtUs = preview.positionUs.value
+        val problem = recorder.start()
+        if (problem != null) toast(problem) else _recording.value = true
+    }
+
+    /** Stops the take and places it on the voice track where recording started. */
+    fun stopVoiceOver(keep: Boolean = true) {
+        if (!recorder.isRecording) return
+        val file = recorder.stop()
+        _recording.value = false
+        if (!keep) {
+            file?.delete()
+            return
+        }
+        if (file == null) return toast("Rekaman terlalu pendek atau tidak ada suara yang terekam.")
+        viewModelScope.launch {
+            val assetId = UUID.randomUUID().toString()
+            when (val r = probe.probe(Uri.fromFile(file), assetId)) {
+                is ProbeResult.Failed -> {
+                    file.delete()
+                    toast("Rekaman tidak bisa dibaca: ${r.reason}")
+                }
+                is ProbeResult.Ok -> {
+                    val id = newId()
+                    perform(AddAudioClip(r.asset.copy(displayName = "Rekaman suara"), id, Project.VOICE_TRACK_ID, recordAtUs), select = id, toastOnSuccess = "Rekaman ditambahkan ke trek suara.")
+                }
+            }
+        }
+    }
+
+    // ---- Keyframes, media replace --------------------------------------------------------------
+
+    /** Offset of the playhead inside [clip], clamped to the clip. */
+    fun offsetIn(clip: Clip): Long = (preview.positionUs.value - clip.timelineStartUs).coerceIn(0L, clip.durationUs)
+
+    /** Jumps to the previous/next keyframe of the clip. */
+    fun seekKeyframe(clip: Clip, forward: Boolean) {
+        val here = clip.sourceAtOffsetUs(offsetIn(clip))
+        val target = if (forward) clip.keyframes.firstOrNull { it.sourceUs > here + Keyframes.MERGE_US }
+        else clip.keyframes.lastOrNull { it.sourceUs < here - Keyframes.MERGE_US }
+        if (target != null) seekTo(clip.timelineStartUs + clip.offsetOfSourceUs(target.sourceUs).coerceIn(0L, clip.durationUs))
+    }
+
+    fun replaceMedia(clipId: String, assetId: String) {
+        val asset = session?.project?.assets?.get(assetId) ?: return
+        perform(ReplaceClipMedia(clipId, asset), select = clipId, toastOnSuccess = "Media klip diganti.")
     }
 
     fun flushSave() {
@@ -185,6 +268,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         session?.project?.let { p -> runCatching { kotlinx.coroutines.runBlocking { repository.save(p) } } }
+        recorder.cancel()
         preview.release()
         export.release()
     }
@@ -430,8 +514,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setColorLook(clipId: String, look: ColorLook) {
-        perform(SetClipColorLook(clipId, look), select = clipId)
+    fun setColorLook(clipId: String, look: ColorLook, intensity: Float? = null) {
+        perform(SetClipColorLook(clipId, look, intensity), select = clipId)
     }
 
     fun rename(name: String) {
@@ -564,7 +648,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val p = session?.project ?: return null
         val s = _exportSettings.value
         val supported = ResolutionPreset.entries.filter { res ->
-            val size = ExportPlanner.outputSize(p.canvas.aspect, res)
+            val size = ExportPlanner.outputSize(p.canvas, res)
             CodecSupport.supports(s.codec.mimeType, size.width, size.height, s.frameRate)
         }.toSet()
         return ExportOptions(s, supported, CodecSupport.hasEncoder(VideoCodec.HEVC.mimeType))
@@ -610,7 +694,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     /** Pushes a project snapshot (committed or draft) to the UI and the preview player. */
     private fun show(p: Project) {
         _state.update { it.copy(project = p) }
-        preview.setPlan(RenderSegments.plan(p), p.canvas.aspect.ratio, preview.positionUs.value.coerceAtMost(p.durationUs))
+        preview.setPlan(RenderSegments.plan(p), p.canvas.ratio, preview.positionUs.value.coerceAtMost(p.durationUs))
     }
 
     private fun scheduleSave() {

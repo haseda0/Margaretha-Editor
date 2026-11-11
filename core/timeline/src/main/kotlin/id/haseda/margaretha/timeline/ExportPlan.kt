@@ -29,7 +29,13 @@ data class RenderSegment(
     val exit: Transition = Transition.NONE,
     /** Needed by players to recognise still images behind extension-less content URIs. */
     val mimeType: String = "",
+    val lookIntensity: Float = 1f,
+    val keyframes: List<Keyframe> = emptyList(),
 ) {
+    /** Pose (static or keyframed) at an offset on the rendered timeline inside this segment. */
+    fun transformAt(offsetUs: Long): Transform =
+        Keyframes.poseAt(keyframes, transform, startMs * US_PER_MS + offsetUs.coerceAtLeast(0L) * speedPermille / 1000L)
+
     /** Rendered duration, after the speed change. */
     val durationUs: Long get() = (endMs - startMs) * US_PER_MS * 1000L / speedPermille
     val timelineEndUs: Long get() = timelineStartUs + durationUs
@@ -37,7 +43,7 @@ data class RenderSegment(
 
     /** True when the picture needs no GPU work beyond the colour look. */
     val hasVisualEdits: Boolean
-        get() = !transform.isIdentity || !crop.isNone || !grade.isNeutral || !fx.isNone || !enter.isNone || !exit.isNone
+        get() = !transform.isIdentity || keyframes.isNotEmpty() || !crop.isNone || !grade.isNeutral || !fx.isNone || !enter.isNone || !exit.isNone
 }
 
 /**
@@ -47,24 +53,27 @@ data class RenderSegment(
 data class EffectStructure(
     val crop: Crop,
     val look: ColorLook,
+    val lookIntensity: Float,
     val grade: Boolean,
     val blur: Boolean,
     val matrix: Boolean,
 ) {
     /** True when the picture can go straight from the decoder to the screen/encoder. */
-    val isEmpty: Boolean get() = crop.isNone && look == ColorLook.ORIGINAL && !grade && !blur && !matrix
+    val isEmpty: Boolean get() = crop.isNone && (look == ColorLook.ORIGINAL || lookIntensity <= 0f) && !grade && !blur && !matrix
 
     companion object {
         fun of(s: RenderSegment): EffectStructure {
             val kinds = setOf(s.enter.kind, s.exit.kind) - TransitionKind.NONE
+            val poses = listOf(s.transform) + s.keyframes.map { it.transform }
             return EffectStructure(
                 crop = s.crop,
                 look = s.colorLook,
+                lookIntensity = if (s.colorLook == ColorLook.ORIGINAL) 1f else s.lookIntensity,
                 // Fade, wipe, zoom and blur transitions darken/reveal the picture in the grade stage.
                 grade = !s.grade.isNeutral || s.fx.sharpen > 0f || s.fx.vignette > 0f || s.fx.grain > 0f ||
-                    s.transform.opacity < 1f || kinds.any { it != TransitionKind.SLIDE },
+                    poses.any { it.opacity < 1f } || kinds.any { it != TransitionKind.SLIDE },
                 blur = s.fx.blur > 0f || TransitionKind.BLUR in kinds,
-                matrix = s.transform.copy(opacity = 1f) != Transform.IDENTITY ||
+                matrix = poses.any { it.copy(opacity = 1f) != Transform.IDENTITY } ||
                     TransitionKind.SLIDE in kinds || TransitionKind.ZOOM in kinds,
             )
         }
@@ -138,6 +147,8 @@ object RenderSegments {
                 enter = clip.enter,
                 exit = clip.exit,
                 mimeType = asset.mimeType,
+                lookIntensity = clip.lookIntensity,
+                keyframes = clip.keyframes,
             ).also { cursor += it.durationUs }
         }
     }
@@ -243,6 +254,7 @@ enum class ResolutionPreset(val shortSide: Int, val label: String) {
 }
 
 enum class QualityPreset(val label: String, val bitsPerPixel: Double) {
+    DRAFT("Draf", 0.045),
     STANDARD("Standar", 0.08),
     HIGH("Kualitas Tinggi", 0.12),
     MAXIMUM("Maksimum", 0.18),
@@ -294,6 +306,16 @@ object ExportPlanner {
     const val MAX_VIDEO_BITRATE = 100_000_000
 
     /** Output size for the canvas aspect at the requested short side, both sides even. */
+    /** Output size for a canvas: the preset decides the short side, the canvas decides the shape. */
+    fun outputSize(canvas: Canvas, resolution: ResolutionPreset): OutputSize {
+        if (!canvas.isCustom) return outputSize(canvas.aspect, resolution)
+        val short = resolution.shortSide
+        val w = canvas.customWidth
+        val h = canvas.customHeight
+        val longSide = even((short.toDouble() * maxOf(w, h) / minOf(w, h)).roundToInt())
+        return if (w >= h) OutputSize(longSide, short) else OutputSize(short, longSide)
+    }
+
     fun outputSize(aspect: AspectRatio, resolution: ResolutionPreset): OutputSize {
         val short = resolution.shortSide
         val longSide = even((short.toDouble() * maxOf(aspect.width, aspect.height) / minOf(aspect.width, aspect.height)).roundToInt())
@@ -322,7 +344,7 @@ object ExportPlanner {
         val render = RenderSegments.plan(project)
         val segments = render.video
         if (segments.isEmpty()) return PlanOutcome.Invalid("Tidak ada klip yang bisa dirender.")
-        val size = outputSize(project.canvas.aspect, settings.resolution)
+        val size = outputSize(project.canvas, settings.resolution)
         val vb = videoBitrate(settings, size)
         val duration = segments.sumOf { it.durationUs }
         return PlanOutcome.Ready(

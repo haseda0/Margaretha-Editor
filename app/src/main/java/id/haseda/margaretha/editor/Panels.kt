@@ -25,8 +25,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -50,11 +48,17 @@ import androidx.compose.ui.unit.dp
 import id.haseda.margaretha.home.fieldColors
 import id.haseda.margaretha.media.ThumbnailCache
 import id.haseda.margaretha.timeline.AspectRatio
+import id.haseda.margaretha.timeline.Canvas
+import id.haseda.margaretha.timeline.ClearKeyframes
 import id.haseda.margaretha.timeline.Clip
+import id.haseda.margaretha.timeline.Keyframes
+import id.haseda.margaretha.timeline.RemoveKeyframe
+import id.haseda.margaretha.timeline.SetKeyframe
 import id.haseda.margaretha.timeline.ClipFx
 import id.haseda.margaretha.timeline.ColorGrade
 import id.haseda.margaretha.timeline.ColorLook
 import id.haseda.margaretha.timeline.Crop
+import id.haseda.margaretha.timeline.Edit
 import id.haseda.margaretha.timeline.FontChoice
 import id.haseda.margaretha.timeline.MediaAsset
 import id.haseda.margaretha.timeline.MediaKind
@@ -77,7 +81,10 @@ import id.haseda.margaretha.timeline.Transition
 import id.haseda.margaretha.timeline.TransitionKind
 import id.haseda.margaretha.timeline.UpdateText
 import id.haseda.margaretha.timeline.US_PER_SECOND
+import id.haseda.margaretha.ui.HardSwitch
 import id.haseda.margaretha.ui.IconAction
+import id.haseda.margaretha.ui.Knob
+import id.haseda.margaretha.ui.KnobStrip
 import id.haseda.margaretha.ui.MColors
 import id.haseda.margaretha.ui.MIcons
 import id.haseda.margaretha.ui.MiniChip
@@ -172,24 +179,58 @@ fun SpeedPanel(vm: EditorViewModel, clip: Clip, onClose: () -> Unit) {
 
 // ---- Transform & crop ----------------------------------------------------------------------------
 
+/**
+ * Position, size and motion. Without keyframes the sliders set one static pose. Once the clip has
+ * keyframes, every change is written to a keyframe at the playhead, so moving the playhead and
+ * adjusting again animates the clip between the two poses.
+ */
 @Composable
-fun TransformPanel(vm: EditorViewModel, clip: Clip, onClose: () -> Unit) {
-    val t = clip.transform
-    fun draft(new: Transform) = vm.draft(SetClipTransform(clip.id, new, clip.crop))
-    val changed = !t.isIdentity || !clip.crop.isNone
-    PanelFrame("Posisi & ukuran", onClose, onReset = onlyIf(changed) { vm.apply(SetClipTransform(clip.id, Transform.IDENTITY, Crop.NONE)) }) {
-        SliderRow("Skala", t.scale, 0.1f..3f, "${percent(t.scale)}%", { draft(t.copy(scale = it)) }, vm::commitDraft, resetTo = 1f)
-        SliderRow("Rotasi", t.rotation, -180f..180f, "${t.rotation.roundToInt()}°", { draft(t.copy(rotation = it.roundToInt().toFloat())) }, vm::commitDraft, resetTo = 0f)
+fun TransformPanel(vm: EditorViewModel, clip: Clip, positionUs: Long, onClose: () -> Unit) {
+    val offsetUs = (positionUs - clip.timelineStartUs).coerceIn(0L, clip.durationUs)
+    val animated = clip.keyframes.isNotEmpty()
+    val t = clip.transformAtOffsetUs(offsetUs)
+    val onKeyframe = Keyframes.near(clip.keyframes, clip.sourceAtOffsetUs(offsetUs)) != null
+    fun edit(new: Transform): Edit = if (animated) SetKeyframe(clip.id, offsetUs, new) else SetClipTransform(clip.id, new, clip.crop)
+    fun draft(new: Transform) = vm.draft(edit(new))
+    val changed = !clip.transform.isIdentity || !clip.crop.isNone || animated
+    PanelFrame(
+        "Posisi & gerak",
+        onClose,
+        // With motion, reset removes the keyframes first (keeping the current pose); a second reset clears the pose.
+        onReset = onlyIf(changed) {
+            vm.apply(if (animated) ClearKeyframes(clip.id, offsetUs) else SetClipTransform(clip.id, Transform.IDENTITY, Crop.NONE))
+        },
+    ) {
+        KnobStrip {
+            Knob("Skala", t.scale, 0.1f..3f, "${percent(t.scale)}%", { draft(t.copy(scale = it)) }, vm::commitDraft, resetTo = 1f)
+            Knob("Rotasi", t.rotation, -180f..180f, "${t.rotation.roundToInt()}°", { draft(t.copy(rotation = it.roundToInt().toFloat())) }, vm::commitDraft, resetTo = 0f)
+            Knob("Opasitas", t.opacity, 0f..1f, "${percent(t.opacity)}%", { draft(t.copy(opacity = it)) }, vm::commitDraft, resetTo = 1f, arcFrom = 0f)
+        }
         SliderRow("Geser X", t.offsetX, -1f..1f, signed(t.offsetX), { draft(t.copy(offsetX = it)) }, vm::commitDraft, resetTo = 0f)
         SliderRow("Geser Y", t.offsetY, -1f..1f, signed(t.offsetY), { draft(t.copy(offsetY = it)) }, vm::commitDraft, resetTo = 0f)
-        SliderRow("Opasitas", t.opacity, 0f..1f, "${percent(t.opacity)}%", { draft(t.copy(opacity = it)) }, vm::commitDraft, resetTo = 1f)
         ChipRow {
-            MiniChip("Balik horizontal", t.flipH, { vm.apply(SetClipTransform(clip.id, t.copy(flipH = !t.flipH), clip.crop)) })
-            MiniChip("Balik vertikal", t.flipV, { vm.apply(SetClipTransform(clip.id, t.copy(flipV = !t.flipV), clip.crop)) })
+            MiniChip("Balik horizontal", t.flipH, { vm.apply(edit(t.copy(flipH = !t.flipH))) })
+            MiniChip("Balik vertikal", t.flipV, { vm.apply(edit(t.copy(flipV = !t.flipV))) })
         }
+        PanelLabel("Keyframe")
+        ChipRow {
+            MiniChip(if (onKeyframe) "◆ Hapus di sini" else "◇ Tambah di sini", onKeyframe, {
+                vm.apply(if (onKeyframe) RemoveKeyframe(clip.id, offsetUs) else SetKeyframe(clip.id, offsetUs, t))
+            })
+            MiniChip("‹ Sebelumnya", false, { vm.seekKeyframe(clip, forward = false) }, enabled = animated)
+            MiniChip("Berikutnya ›", false, { vm.seekKeyframe(clip, forward = true) }, enabled = animated)
+            MiniChip("Hapus semua", false, { vm.apply(ClearKeyframes(clip.id, offsetUs)) }, enabled = animated)
+        }
+        Text(
+            if (animated) "${clip.keyframes.size} keyframe. Perubahan di atas disimpan pada keyframe di posisi playhead; di antaranya klip bergerak halus."
+            else "Tambah keyframe, pindahkan playhead, lalu ubah posisi/skala/rotasi/opasitas untuk membuat gerakan.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MColors.TextFaint,
+            modifier = Modifier.padding(top = 6.dp),
+        )
         PanelLabel("Potong tepi")
         val c = clip.crop
-        fun crop(new: () -> Crop) = runCatching(new).getOrNull()?.let { vm.apply(SetClipTransform(clip.id, t, it)) }
+        fun crop(new: () -> Crop) = runCatching(new).getOrNull()?.let { vm.apply(SetClipTransform(clip.id, clip.transform, it)) }
         CommitSlider("Kiri", c.left, 0f..Crop.MAX, { "${percent(it)}%" }, 0f) { crop { c.copy(left = it) } }
         CommitSlider("Kanan", c.right, 0f..Crop.MAX, { "${percent(it)}%" }, 0f) { crop { c.copy(right = it) } }
         CommitSlider("Atas", c.top, 0f..Crop.MAX, { "${percent(it)}%" }, 0f) { crop { c.copy(top = it) } }
@@ -208,20 +249,19 @@ fun AudioPanel(vm: EditorViewModel, clip: Clip, hasSound: Boolean, onClose: () -
         }
         fun draft(volume: Float = clip.volume, fadeIn: Long = clip.audioFadeInUs, fadeOut: Long = clip.audioFadeOutUs) =
             vm.draft(SetClipAudio(clip.id, volume, clip.muted, fadeIn, fadeOut))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Bisukan", style = MaterialTheme.typography.labelMedium, color = MColors.TextMuted, modifier = Modifier.weight(1f))
-            Switch(
-                checked = clip.muted,
-                onCheckedChange = { vm.apply(SetClipAudio(clip.id, clip.volume, it)) },
-                colors = SwitchDefaults.colors(checkedTrackColor = MColors.Accent, checkedThumbColor = MColors.OnAccent),
-            )
-        }
-        Box(Modifier.alpha(if (clip.muted) 0.4f else 1f)) {
-            SliderRow("Volume", clip.volume, 0f..1f, "${percent(clip.volume)}%", { draft(volume = it) }, vm::commitDraft, resetTo = 1f)
-        }
         val maxFade = (clip.durationUs / 2).coerceIn(100_000L, 5_000_000L).toFloat()
-        SliderRow("Fade masuk", clip.audioFadeInUs.toFloat(), 0f..maxFade, seconds(clip.audioFadeInUs), { draft(fadeIn = (it.toLong() / 100_000L) * 100_000L) }, vm::commitDraft, resetTo = 0f)
-        SliderRow("Fade keluar", clip.audioFadeOutUs.toFloat(), 0f..maxFade, seconds(clip.audioFadeOutUs), { draft(fadeOut = (it.toLong() / 100_000L) * 100_000L) }, vm::commitDraft, resetTo = 0f)
+        KnobStrip {
+            Knob("Volume", clip.volume, 0f..1f, "${percent(clip.volume)}%", { draft(volume = it) }, vm::commitDraft, resetTo = 1f, arcFrom = 0f, enabled = !clip.muted)
+            Knob("Fade masuk", clip.audioFadeInUs.toFloat(), 0f..maxFade, seconds(clip.audioFadeInUs), { draft(fadeIn = (it.toLong() / 100_000L) * 100_000L) }, vm::commitDraft, resetTo = 0f)
+            Knob("Fade keluar", clip.audioFadeOutUs.toFloat(), 0f..maxFade, seconds(clip.audioFadeOutUs), { draft(fadeOut = (it.toLong() / 100_000L) * 100_000L) }, vm::commitDraft, resetTo = 0f)
+        }
+        Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Bisukan", style = MaterialTheme.typography.bodyMedium, color = MColors.Text)
+                Text("Putar knob untuk mengatur; ketuk dua kali untuk kembali ke awal.", style = MaterialTheme.typography.bodySmall, color = MColors.TextFaint)
+            }
+            HardSwitch(clip.muted, { vm.apply(SetClipAudio(clip.id, clip.volume, it)) }, "Bisukan klip")
+        }
     }
 }
 
@@ -260,6 +300,9 @@ fun LookPanel(vm: EditorViewModel, clip: Clip, onClose: () -> Unit) {
         Spacer(Modifier.height(10.dp))
         ChipRow {
             ColorLook.entries.forEach { look -> MiniChip(look.title, clip.colorLook == look, { vm.setColorLook(clip.id, look) }) }
+        }
+        if (clip.colorLook != ColorLook.ORIGINAL) {
+            CommitSlider("Intensitas", clip.lookIntensity, 0f..1f, { "${percent(it)}%" }, 1f) { vm.setColorLook(clip.id, clip.colorLook, it) }
         }
     }
 }
@@ -390,6 +433,8 @@ fun TextPanel(vm: EditorViewModel, item: TextItem, isSubtitle: Boolean, onClose:
             MiniChip("Bawah", item.y == TextItem.SUBTITLE_Y, { apply(item.copy(x = 0.5f, y = TextItem.SUBTITLE_Y)) })
         }
         Text("Atau seret teks langsung di pratinjau.", style = MaterialTheme.typography.bodySmall, color = MColors.TextFaint, modifier = Modifier.padding(top = 4.dp))
+        SliderRow("Rotasi", item.rotation, -180f..180f, "${item.rotation.roundToInt()}°", { vm.draft(UpdateText(item.copy(rotation = it.roundToInt().toFloat()))) }, vm::commitDraft, resetTo = 0f)
+        SliderRow("Opasitas", item.opacity, 0f..1f, "${percent(item.opacity)}%", { vm.draft(UpdateText(item.copy(opacity = it))) }, vm::commitDraft, resetTo = 1f)
         PanelLabel("Garis tepi & bayangan")
         SliderRow("Garis tepi", style.strokeWidth, 0f..0.3f, percent(style.strokeWidth / 0.3f), { draftStyle(style.copy(strokeWidth = it)) }, vm::commitDraft, resetTo = 0f)
         ChipRow {
@@ -420,13 +465,35 @@ fun TextPanel(vm: EditorViewModel, item: TextItem, isSubtitle: Boolean, onClose:
 fun CanvasPanel(vm: EditorViewModel, project: Project, onClose: () -> Unit) {
     PanelFrame("Kanvas", onClose) {
         PanelLabel("Rasio aspek")
+        val canvas = project.canvas
         ChipRow {
-            AspectRatio.entries.forEach { a -> MiniChip(a.label, project.canvas.aspect == a, { vm.setCanvas(project.canvas.copy(aspect = a)) }) }
+            AspectRatio.entries.forEach { a ->
+                MiniChip(a.label, !canvas.isCustom && canvas.aspect == a, { vm.setCanvas(canvas.copy(aspect = a, customWidth = 0, customHeight = 0)) })
+            }
+            MiniChip("Kustom", canvas.isCustom, { if (!canvas.isCustom) vm.setCanvas(canvas.copy(customWidth = 1080, customHeight = 1350)) })
         }
-        Text(project.canvas.aspect.usage, style = MaterialTheme.typography.bodySmall, color = MColors.TextFaint, modifier = Modifier.padding(top = 6.dp))
+        if (canvas.isCustom) {
+            var w by remember(canvas.customWidth) { mutableStateOf(canvas.customWidth.toString()) }
+            var h by remember(canvas.customHeight) { mutableStateOf(canvas.customHeight.toString()) }
+            val wide = w.toIntOrNull()?.takeIf { it in Canvas.MIN_SIDE..Canvas.MAX_SIDE }
+            val high = h.toIntOrNull()?.takeIf { it in Canvas.MIN_SIDE..Canvas.MAX_SIDE }
+            Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(w, { w = it.filter(Char::isDigit).take(4) }, Modifier.weight(1f), label = { Text("Lebar") }, singleLine = true, isError = wide == null, colors = fieldColors())
+                OutlinedTextField(h, { h = it.filter(Char::isDigit).take(4) }, Modifier.weight(1f), label = { Text("Tinggi") }, singleLine = true, isError = high == null, colors = fieldColors())
+                QuietButton("Terapkan", { if (wide != null && high != null) vm.setCanvas(canvas.copy(customWidth = wide, customHeight = high)) })
+            }
+            Text(
+                "Sisi ${Canvas.MIN_SIDE}–${Canvas.MAX_SIDE} piksel. Ukuran ini menentukan bentuk bingkai; resolusi file dipilih saat ekspor.",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (wide == null || high == null) MColors.Warning else MColors.TextFaint,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        } else {
+            Text(canvas.aspect.usage, style = MaterialTheme.typography.bodySmall, color = MColors.TextFaint, modifier = Modifier.padding(top = 6.dp))
+        }
         PanelLabel("Frame rate proyek")
         ChipRow {
-            listOf(24, 25, 30, 60).forEach { fps -> MiniChip("$fps", project.canvas.frameRate == fps, { vm.setCanvas(project.canvas.copy(frameRate = fps)) }) }
+            listOf(24, 25, 30, 60).forEach { fps -> MiniChip("$fps", canvas.frameRate == fps, { vm.setCanvas(canvas.copy(frameRate = fps)) }) }
         }
         Text("Dipakai untuk langkah per-frame dan timecode. Frame rate file hasil dipilih saat ekspor.", style = MaterialTheme.typography.bodySmall, color = MColors.TextFaint, modifier = Modifier.padding(top = 6.dp))
     }
@@ -442,6 +509,8 @@ fun MediaPanel(
     cache: ThumbnailCache,
     onImportVisual: () -> Unit,
     onImportAudio: () -> Unit,
+    /** Clip whose media can be swapped from the library, when one is selected. */
+    replaceTarget: Clip?,
     onClose: () -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
@@ -493,6 +562,7 @@ fun MediaPanel(
                 cache = cache,
                 onAdd = { vm.addAssetToTimeline(asset.id) },
                 onAddSound = onlyIf(asset.kind == MediaKind.VIDEO && asset.hasAudio) { vm.addAssetAudio(asset.id, Project.VOICE_TRACK_ID) },
+                onReplace = onlyIf(replaceTarget != null && replaceTarget.assetId != asset.id) { replaceTarget?.let { vm.replaceMedia(it.id, asset.id) } },
                 onRemove = { confirmRemove = asset },
             )
         }
@@ -517,6 +587,7 @@ private fun AssetRow(
     cache: ThumbnailCache,
     onAdd: () -> Unit,
     onAddSound: (() -> Unit)?,
+    onReplace: (() -> Unit)?,
     onRemove: () -> Unit,
 ) {
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -544,6 +615,7 @@ private fun AssetRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        if (onReplace != null) IconAction(MIcons.Link, "Ganti media klip terpilih dengan ini", onReplace, size = 44.dp, tint = MColors.TextMuted)
         if (onAddSound != null) IconAction(MIcons.Volume, "Pakai suaranya saja di trek suara", onAddSound, size = 44.dp, tint = MColors.TextMuted)
         IconAction(MIcons.Add, "Tambahkan ke timeline", onAdd, size = 44.dp, tint = MColors.Accent)
         IconAction(MIcons.Delete, "Hapus dari proyek", onRemove, size = 44.dp, tint = MColors.TextMuted, enabled = useCount == 0)

@@ -3,7 +3,11 @@ package id.haseda.margaretha
 import android.app.Application
 import android.content.ComponentCallbacks2
 import android.content.Context
+import id.haseda.margaretha.account.AccountRepository
+import id.haseda.margaretha.account.SessionStore
 import id.haseda.margaretha.data.AppSettings
+import id.haseda.margaretha.data.ExportHistory
+import id.haseda.margaretha.data.UserStorage
 import id.haseda.margaretha.data.ProjectRepository
 import id.haseda.margaretha.media.MediaProbe
 import id.haseda.margaretha.media.ThumbnailCache
@@ -16,6 +20,9 @@ class AppContainer(context: Context) {
     val thumbnails = ThumbnailCache(context)
     val settings = AppSettings(context)
     val waveforms = WaveformCache(context)
+    val storage = UserStorage(context, settings)
+    val exportHistory = ExportHistory(context)
+    val account = AccountRepository(SessionStore(context))
 }
 
 class MargarethaApp : Application() {

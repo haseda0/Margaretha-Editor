@@ -411,6 +411,18 @@ fun TimelineView(
                         }
                     }
                 }
+                // Keyframe markers along the bottom edge of the clip.
+                clip.keyframes.forEach { k ->
+                    val kx = clip.offsetOfSourceUs(k.sourceUs) * pxPerUs
+                    if (kx in 0f..w) {
+                        Icon(
+                            MIcons.Diamond,
+                            contentDescription = null,
+                            tint = MColors.AccentBright,
+                            modifier = Modifier.offset { IntOffset((kx - 5.dp.toPx()).roundToInt(), (TRACK_H - 13.dp).roundToPx()) }.size(10.dp),
+                        )
+                    }
+                }
                 if (selected) {
                     TrimHandle(Modifier.align(Alignment.CenterStart), "Pegangan pangkas awal")
                     TrimHandle(Modifier.align(Alignment.CenterEnd), "Pegangan pangkas akhir")

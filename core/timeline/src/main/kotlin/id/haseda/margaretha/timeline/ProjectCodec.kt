@@ -5,7 +5,7 @@ package id.haseda.margaretha.timeline
  * Decoding never throws: corrupted or unsupported files produce [DecodeResult.Failure].
  */
 object ProjectCodec {
-    const val SCHEMA_VERSION = 3
+    const val SCHEMA_VERSION = 4
     const val FORMAT_ID = "margaretha-editor-project"
 
     sealed interface DecodeResult {
@@ -21,9 +21,12 @@ object ProjectCodec {
             "name" to project.name.j(),
             "createdAtMs" to project.createdAtMs.j(),
             "updatedAtMs" to project.updatedAtMs.j(),
+            "ownerId" to project.ownerId.j(),
             "canvas" to jsonOf(
                 "aspect" to project.canvas.aspect.name.j(),
                 "frameRate" to project.canvas.frameRate.j(),
+                "customWidth" to project.canvas.customWidth.j(),
+                "customHeight" to project.canvas.customHeight.j(),
             ),
             "assets" to Json.Arr(project.assets.values.sortedBy { it.id }.map(::encodeAsset)),
             "tracks" to Json.Arr(project.tracks.map(::encodeTrack)),
@@ -57,6 +60,8 @@ object ProjectCodec {
                 // v3 only adds optional fields (speed, transform, grade, effects, transitions, audio and
                 // text tracks); every one of them has a neutral default when absent.
                 2 -> doc = Json.Obj(doc.fields + ("schemaVersion" to 3.j()))
+                // v4 adds keyframes, look intensity, text rotation/opacity, custom canvas size and owner id.
+                3 -> doc = Json.Obj(doc.fields + ("schemaVersion" to 4.j()))
             }
             v++
         }
@@ -94,7 +99,8 @@ object ProjectCodec {
             name = root.str("name"),
             createdAtMs = root.long("createdAtMs"),
             updatedAtMs = root.long("updatedAtMs"),
-            canvas = Canvas(aspect, canvasObj.int("frameRate")),
+            canvas = Canvas(aspect, canvasObj.int("frameRate"), canvasObj.optLong("customWidth", 0L).toInt(), canvasObj.optLong("customHeight", 0L).toInt()),
+            ownerId = (root.fields["ownerId"] as? Json.Str)?.value.orEmpty(),
             assets = assets.associateBy { it.id },
             tracks = root.arr("tracks").map { decodeTrack(it.obj()) },
         )
@@ -183,12 +189,7 @@ object ProjectCodec {
             "audioFadeOutUs" to c.audioFadeOutUs.j(),
         )
         // Neutral values are omitted to keep project files small and readable.
-        if (!c.transform.isIdentity) fields["transform"] = c.transform.let {
-            jsonOf(
-                "scale" to it.scale.j(), "rotation" to it.rotation.j(), "offsetX" to it.offsetX.j(), "offsetY" to it.offsetY.j(),
-                "flipH" to it.flipH.j(), "flipV" to it.flipV.j(), "opacity" to it.opacity.j(),
-            )
-        }
+        if (!c.transform.isIdentity) fields["transform"] = encodeTransform(c.transform)
         if (!c.crop.isNone) fields["crop"] = c.crop.let {
             jsonOf("left" to it.left.j(), "top" to it.top.j(), "right" to it.right.j(), "bottom" to it.bottom.j())
         }
@@ -202,10 +203,23 @@ object ProjectCodec {
         if (!c.fx.isNone) fields["fx"] = c.fx.let {
             jsonOf("blur" to it.blur.j(), "sharpen" to it.sharpen.j(), "vignette" to it.vignette.j(), "grain" to it.grain.j())
         }
+        if (c.lookIntensity != 1f) fields["lookIntensity"] = c.lookIntensity.j()
+        if (c.keyframes.isNotEmpty()) fields["keyframes"] = Json.Arr(c.keyframes.map { jsonOf("sourceUs" to it.sourceUs.j(), "transform" to encodeTransform(it.transform)) })
         if (!c.enter.isNone) fields["enter"] = encodeTransition(c.enter)
         if (!c.exit.isNone) fields["exit"] = encodeTransition(c.exit)
         return Json.Obj(fields)
     }
+
+    private fun encodeTransform(t: Transform): Json = jsonOf(
+        "scale" to t.scale.j(), "rotation" to t.rotation.j(), "offsetX" to t.offsetX.j(), "offsetY" to t.offsetY.j(),
+        "flipH" to t.flipH.j(), "flipV" to t.flipV.j(), "opacity" to t.opacity.j(),
+    )
+
+    private fun decodeTransform(o: Json.Obj) = Transform(
+        scale = o.float("scale", 1f), rotation = o.float("rotation", 0f),
+        offsetX = o.float("offsetX", 0f), offsetY = o.float("offsetY", 0f),
+        flipH = o.bool("flipH", false), flipV = o.bool("flipV", false), opacity = o.float("opacity", 1f),
+    )
 
     private fun encodeTransition(t: Transition): Json = jsonOf("kind" to t.kind.name.j(), "durationUs" to t.durationUs.j())
 
@@ -226,13 +240,12 @@ object ProjectCodec {
         speedPermille = o.optLong("speedPermille", 1000L).toInt(),
         audioFadeInUs = o.optLong("audioFadeInUs", 0L),
         audioFadeOutUs = o.optLong("audioFadeOutUs", 0L),
-        transform = o.optObj("transform")?.let {
-            Transform(
-                scale = it.float("scale", 1f), rotation = it.float("rotation", 0f),
-                offsetX = it.float("offsetX", 0f), offsetY = it.float("offsetY", 0f),
-                flipH = it.bool("flipH", false), flipV = it.bool("flipV", false), opacity = it.float("opacity", 1f),
-            )
-        } ?: Transform.IDENTITY,
+        transform = o.optObj("transform")?.let(::decodeTransform) ?: Transform.IDENTITY,
+        lookIntensity = o.float("lookIntensity", 1f),
+        keyframes = (o.fields["keyframes"] as? Json.Arr)?.items.orEmpty().map {
+            val k = it.obj()
+            Keyframe(k.long("sourceUs"), decodeTransform(k.req("transform").obj()))
+        },
         crop = o.optObj("crop")?.let {
             Crop(it.float("left", 0f), it.float("top", 0f), it.float("right", 0f), it.float("bottom", 0f))
         } ?: Crop.NONE,
@@ -258,6 +271,8 @@ object ProjectCodec {
         "x" to t.x.j(),
         "y" to t.y.j(),
         "animation" to t.animation.name.j(),
+        "rotation" to t.rotation.j(),
+        "opacity" to t.opacity.j(),
         "style" to t.style.let {
             jsonOf(
                 "font" to it.font.name.j(), "size" to it.size.j(), "bold" to it.bold.j(), "italic" to it.italic.j(),
@@ -278,6 +293,8 @@ object ProjectCodec {
             x = o.float("x", 0.5f),
             y = o.float("y", 0.5f),
             animation = enumOf(o, "animation", TextAnimation.NONE, "Animasi teks tidak dikenal"),
+            rotation = o.float("rotation", 0f),
+            opacity = o.float("opacity", 1f),
             style = if (st == null) base else TextStyle(
                 font = enumOf(st, "font", base.font, "Font tidak dikenal"),
                 size = st.float("size", base.size),

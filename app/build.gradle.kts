@@ -3,6 +3,16 @@ plugins {
     alias(libs.plugins.compose)
 }
 
+// Account backend (Supabase). Values come from the environment (CI) or an untracked
+// backend.properties; when absent the app is built without accounts and says so in the UI.
+val backendFile = rootProject.file("backend.properties")
+val backendProps = java.util.Properties().apply { if (backendFile.exists()) backendFile.inputStream().use { load(it) } }
+fun backendValue(key: String): String =
+    (System.getenv("MARGARETHA_$key") ?: backendProps.getProperty(key) ?: "").trim().replace("\\", "").replace("\"", "")
+
+// Release signing: a real keystore when provided through the environment, otherwise the debug key.
+val releaseStore = System.getenv("MARGARETHA_KEYSTORE_FILE")?.takeIf { it.isNotBlank() && file(it).exists() }
+
 android {
     namespace = "id.haseda.margaretha"
     compileSdk = 36
@@ -11,15 +21,29 @@ android {
         applicationId = "id.haseda.margaretha"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "2.0.0-studio"
+        versionCode = 4
+        versionName = "2.1.0-studio"
+        buildConfigField("String", "SUPABASE_URL", "\"${backendValue("SUPABASE_URL")}\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"${backendValue("SUPABASE_ANON_KEY")}\"")
+    }
+
+    signingConfigs {
+        if (releaseStore != null) {
+            create("release") {
+                storeFile = file(releaseStore)
+                storePassword = System.getenv("MARGARETHA_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("MARGARETHA_KEY_ALIAS")
+                keyPassword = System.getenv("MARGARETHA_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Private distribution: signed with the debug key so the APK installs directly.
-            signingConfig = signingConfigs.getByName("debug")
+            // Without a provided keystore the release is signed with the debug key so the APK still
+            // installs directly; such a build cannot be uploaded to Play.
+            signingConfig = signingConfigs.getByName(if (releaseStore != null) "release" else "debug")
         }
     }
 
@@ -30,6 +54,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     lint {

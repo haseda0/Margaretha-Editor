@@ -147,7 +147,7 @@ private fun Options(vm: EditorViewModel, exportState: ExportState) {
     Section("Resolusi")
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ResolutionPreset.entries.forEach { r ->
-            val size = ExportPlanner.outputSize(project.canvas.aspect, r)
+            val size = ExportPlanner.outputSize(project.canvas, r)
             val ok = r in options.supportedResolutions
             OptionChip(r.label, settings.resolution == r, { set(settings.copy(resolution = r)) }, enabled = ok, sub = if (ok) size.toString() else "tak didukung")
         }
@@ -289,8 +289,10 @@ private fun Success(state: ExportState.Success, onPlay: () -> Unit, onDone: () -
     ) {
         Info("Ukuran", "${out.width}×${out.height}")
         Info("Durasi", Timecode.format(out.durationUs))
-        Info("File", Timecode.bytes(out.sizeBytes))
+        Info("Ukuran file", Timecode.bytes(out.sizeBytes))
+        Info("Nama file", out.fileName)
         Info("Lokasi", out.locationLabel)
+        out.note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MColors.Warning, modifier = Modifier.padding(vertical = 4.dp)) }
     }
     Spacer(Modifier.height(16.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {

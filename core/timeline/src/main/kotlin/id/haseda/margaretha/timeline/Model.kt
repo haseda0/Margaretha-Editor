@@ -61,6 +61,50 @@ data class Transform(
     }
 }
 
+/**
+ * A pose of the clip at a moment of its **source** media. Storing source time means trimming,
+ * splitting and speed changes never have to rewrite keyframes: the motion stays glued to the
+ * pictures it was designed for.
+ */
+data class Keyframe(val sourceUs: Long, val transform: Transform) {
+    init {
+        require(sourceUs >= 0) { "keyframe time must be >= 0" }
+    }
+}
+
+object Keyframes {
+    /** Two keyframes closer than this are the same keyframe (about one frame at 30 fps). */
+    const val MERGE_US = 33_000L
+    const val MAX_PER_CLIP = 200
+
+    /** Pose at [sourceUs]: held before the first and after the last keyframe, linear in between. */
+    fun poseAt(keyframes: List<Keyframe>, base: Transform, sourceUs: Long): Transform {
+        if (keyframes.isEmpty()) return base
+        val first = keyframes.first()
+        val last = keyframes.last()
+        if (sourceUs <= first.sourceUs) return first.transform
+        if (sourceUs >= last.sourceUs) return last.transform
+        val i = keyframes.indexOfLast { it.sourceUs <= sourceUs }
+        val a = keyframes[i]
+        val b = keyframes[i + 1]
+        val k = (sourceUs - a.sourceUs).toFloat() / (b.sourceUs - a.sourceUs).toFloat()
+        fun mix(x: Float, y: Float) = x + (y - x) * k
+        return Transform(
+            scale = mix(a.transform.scale, b.transform.scale),
+            rotation = mix(a.transform.rotation, b.transform.rotation),
+            offsetX = mix(a.transform.offsetX, b.transform.offsetX),
+            offsetY = mix(a.transform.offsetY, b.transform.offsetY),
+            // Flips cannot be blended; the earlier keyframe decides.
+            flipH = a.transform.flipH,
+            flipV = a.transform.flipV,
+            opacity = mix(a.transform.opacity, b.transform.opacity),
+        )
+    }
+
+    fun near(keyframes: List<Keyframe>, sourceUs: Long): Keyframe? =
+        keyframes.minByOrNull { kotlin.math.abs(it.sourceUs - sourceUs) }?.takeIf { kotlin.math.abs(it.sourceUs - sourceUs) <= MERGE_US }
+}
+
 /** Fractions (0..MAX) removed from each side of the source picture. */
 data class Crop(val left: Float = 0f, val top: Float = 0f, val right: Float = 0f, val bottom: Float = 0f) {
     init {
@@ -169,8 +213,14 @@ data class Clip(
     val fx: ClipFx = ClipFx.NONE,
     val enter: Transition = Transition.NONE,
     val exit: Transition = Transition.NONE,
+    /** Strength of [colorLook], 0..1. */
+    val lookIntensity: Float = 1f,
+    /** Motion keyframes sorted by source time; empty means the static [transform] is used. */
+    val keyframes: List<Keyframe> = emptyList(),
 ) {
     init {
+        require(lookIntensity in 0f..1f) { "look intensity out of range" }
+        require(keyframes.zipWithNext().all { (a, b) -> a.sourceUs < b.sourceUs }) { "keyframes must be sorted and unique" }
         require(sourceInUs >= 0) { "sourceInUs must be >= 0" }
         require(sourceOutUs > sourceInUs) { "sourceOutUs must be > sourceInUs" }
         require(timelineStartUs >= 0) { "timelineStartUs must be >= 0" }
@@ -193,6 +243,12 @@ data class Clip(
 
     /** Source time shown at a timeline offset inside this clip. */
     fun sourceAtOffsetUs(offsetUs: Long): Long = sourceInUs + offsetUs * speedPermille / 1000L
+
+    /** Timeline offset inside this clip at which a source time is shown. */
+    fun offsetOfSourceUs(sourceUs: Long): Long = (sourceUs - sourceInUs) * 1000L / speedPermille
+
+    /** Pose (static or keyframed) at a timeline offset inside this clip. */
+    fun transformAtOffsetUs(offsetUs: Long): Transform = Keyframes.poseAt(keyframes, transform, sourceAtOffsetUs(offsetUs))
 
     companion object {
         const val MIN_SPEED = 250
@@ -261,8 +317,13 @@ data class TextItem(
     val y: Float = 0.5f,
     val style: TextStyle = TextStyle.TITLE,
     val animation: TextAnimation = TextAnimation.NONE,
+    /** Clockwise degrees. */
+    val rotation: Float = 0f,
+    val opacity: Float = 1f,
 ) {
     init {
+        require(rotation in -180f..180f) { "text rotation out of range" }
+        require(opacity in 0f..1f) { "text opacity out of range" }
         require(startUs >= 0) { "startUs must be >= 0" }
         require(durationUs >= MIN_US) { "text too short" }
         require(x in 0f..1f && y in 0f..1f) { "text position out of range" }
@@ -356,9 +417,24 @@ enum class AspectRatio(val width: Int, val height: Int, val label: String, val u
     val ratio: Float get() = width.toFloat() / height.toFloat()
 }
 
-data class Canvas(val aspect: AspectRatio, val frameRate: Int = 30) {
+/**
+ * Output frame shape. [aspect] is a preset; a custom size (both sides set) overrides its ratio.
+ */
+data class Canvas(val aspect: AspectRatio, val frameRate: Int = 30, val customWidth: Int = 0, val customHeight: Int = 0) {
     init {
         require(frameRate in 1..120) { "frameRate out of range" }
+        require((customWidth == 0 && customHeight == 0) || (customWidth in MIN_SIDE..MAX_SIDE && customHeight in MIN_SIDE..MAX_SIDE)) {
+            "custom size out of range"
+        }
+    }
+
+    val isCustom: Boolean get() = customWidth > 0
+    val ratio: Float get() = if (isCustom) customWidth.toFloat() / customHeight else aspect.ratio
+    val label: String get() = if (isCustom) "${customWidth}×$customHeight" else aspect.label
+
+    companion object {
+        const val MIN_SIDE = 144
+        const val MAX_SIDE = 4096
     }
 
     val frameDurationUs: Long get() = US_PER_SECOND / frameRate
@@ -372,6 +448,8 @@ data class Project(
     val canvas: Canvas,
     val assets: Map<String, MediaAsset>,
     val tracks: List<Track>,
+    /** Account that owns the project; empty for projects made without signing in. */
+    val ownerId: String = "",
 ) {
     val mainTrack: Track
         get() = tracks.firstOrNull { it.kind == TrackKind.MAIN_VIDEO }
@@ -424,7 +502,7 @@ data class Project(
             VOICE_TRACK_ID to TrackKind.AUDIO,
         )
 
-        fun create(id: String, name: String, canvas: Canvas, nowMs: Long): Project = Project(
+        fun create(id: String, name: String, canvas: Canvas, nowMs: Long, ownerId: String = ""): Project = Project(
             id = id,
             name = name,
             createdAtMs = nowMs,
@@ -432,6 +510,7 @@ data class Project(
             canvas = canvas,
             assets = emptyMap(),
             tracks = listOf(Track(MAIN_TRACK_ID, TrackKind.MAIN_VIDEO, emptyList(), magnetic = true)),
+            ownerId = ownerId,
         )
     }
 }

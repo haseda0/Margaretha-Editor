@@ -88,4 +88,6 @@ object MIcons {
     val Image = icon("image", strokes = listOf("M5 4.5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1z", "M4.5 16l4.5-4.5 4 4 2.5-2.5 4 4", "M14 9a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0"))
     val Reset = icon("reset", strokes = listOf("M4.5 12a7.5 7.5 0 1 0 2.4-5.5", "M4.5 4.5v4.5H9"))
     val Canvas = icon("canvas", strokes = listOf("M7 3.5h10a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1z", "M2.5 8v8", "M21.5 8v8"))
+    val Mic = icon("mic", strokes = listOf("M12 3.5a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0v-5a3 3 0 0 0-3-3z", "M6 11.5a6 6 0 0 0 12 0", "M12 17.5v3", "M9 20.5h6"))
+    val Diamond = icon("diamond", fills = listOf("M12 4.5 19.5 12 12 19.5 4.5 12z"))
 }

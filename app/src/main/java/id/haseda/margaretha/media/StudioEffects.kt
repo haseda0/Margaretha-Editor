@@ -71,7 +71,7 @@ object StudioEffects {
     fun build(structure: EffectStructure, segment: () -> RenderSegment, canvasAspect: Float, time: ClipTime, presentation: Presentation?): List<Effect> = buildList {
         val c = structure.crop
         if (!c.isNone) add(Crop(-1f + 2f * c.left, 1f - 2f * c.right, -1f + 2f * c.bottom, 1f - 2f * c.top))
-        addAll(colorEffects(structure.look))
+        addAll(colorEffects(structure.look, structure.lookIntensity))
         if (structure.grade) add(GradeEffect(segment, time))
         if (structure.blur) {
             add(BlurEffect(segment, time, horizontal = true))
@@ -139,7 +139,8 @@ private class GradeEffect(private val segment: () -> RenderSegment, private val 
         StudioShaderProgram(context, "shaders/studio_grade_fragment.glsl", useHdr) { p, _, _, pts ->
             val s = segment()
             val g = s.grade
-            val state = Motion.transition(s, time.offsetUs(pts))
+            val offsetUs = time.offsetUs(pts)
+            val state = Motion.transition(s, offsetUs)
             val fades = state.kind == TransitionKind.FADE || state.kind == TransitionKind.BLUR || state.kind == TransitionKind.ZOOM
             p.setFloatUniform("uExposure", g.exposure)
             p.setFloatUniform("uBrightness", g.brightness)
@@ -158,7 +159,7 @@ private class GradeEffect(private val segment: () -> RenderSegment, private val 
             p.setFloatUniform("uFade", if (fades) state.visibility else 1f)
             p.setFloatUniform("uWipe", if (state.kind == TransitionKind.WIPE) state.visibility else 1f)
             p.setFloatUniform("uWipeExit", if (state.entering) 0f else 1f)
-            p.setFloatUniform("uOpacity", s.transform.opacity)
+            p.setFloatUniform("uOpacity", s.transformAt(offsetUs).opacity)
         }
 }
 
@@ -187,8 +188,9 @@ private class TransformEffect(
 
     override fun getMatrix(presentationTimeUs: Long): Matrix {
         val s = segment()
-        val t = s.transform
-        val state = Motion.transition(s, time.offsetUs(presentationTimeUs))
+        val offsetUs = time.offsetUs(presentationTimeUs)
+        val t = s.transformAt(offsetUs)
+        val state = Motion.transition(s, offsetUs)
         val hidden = 1f - state.visibility
         var scale = t.scale
         // Normalised device coordinates: the canvas spans -1..1 and y points up.

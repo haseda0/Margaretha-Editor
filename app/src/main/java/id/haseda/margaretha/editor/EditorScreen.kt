@@ -43,6 +43,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -93,6 +94,10 @@ import id.haseda.margaretha.timeline.Timecode
 import id.haseda.margaretha.timeline.UpdateText
 import id.haseda.margaretha.ui.AccentPill
 import id.haseda.margaretha.ui.IconAction
+import id.haseda.margaretha.ui.JogWheel
+import id.haseda.margaretha.ui.Readout
+import id.haseda.margaretha.ui.raised
+import kotlinx.coroutines.launch
 import id.haseda.margaretha.ui.MColors
 import id.haseda.margaretha.ui.MIcons
 import id.haseda.margaretha.ui.QuietButton
@@ -120,6 +125,8 @@ fun EditorScreen(vm: EditorViewModel, onClose: () -> Unit) {
     val exportBusy = exportState is ExportState.Running || exportState is ExportState.Verifying
 
     val snackbar = remember { SnackbarHostState() }
+    val uiScope = rememberCoroutineScope()
+    val scopeSnack: (String) -> Unit = { text -> uiScope.launch { snackbar.showSnackbar(text) } }
     var showExport by rememberSaveable { mutableStateOf(false) }
     var tab by rememberSaveable { mutableStateOf(ToolTab.EDIT) }
     var panel by rememberSaveable { mutableStateOf(Panel.NONE) }
@@ -155,6 +162,10 @@ fun EditorScreen(vm: EditorViewModel, onClose: () -> Unit) {
         val id = relinkAssetId
         if (uri != null && id != null) vm.relink(id, uri)
         relinkAssetId = null
+    }
+    val recording by vm.recording.collectAsStateWithLifecycle()
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) vm.startVoiceOver() else scopeSnack("Izin mikrofon ditolak. Rekam suara butuh izin itu; kamu bisa mengaktifkannya di pengaturan aplikasi.")
     }
     val pickVisual = { addPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) }
     val pickAudio = { trackId: String ->
@@ -319,6 +330,7 @@ fun EditorScreen(vm: EditorViewModel, onClose: () -> Unit) {
                                 onTracks = { showTracks = true },
                                 onAddMusic = { pickAudio(Project.MUSIC_TRACK_ID) },
                                 onAddVoice = { pickAudio(Project.VOICE_TRACK_ID) },
+                                onRecord = { micPermission.launch(android.Manifest.permission.RECORD_AUDIO) },
                                 onAddText = {
                                     vm.addText(subtitle = false)
                                     panel = Panel.TEXT
@@ -333,7 +345,7 @@ fun EditorScreen(vm: EditorViewModel, onClose: () -> Unit) {
                             )
                         }
                         Panel.SPEED -> targetClip?.let { SpeedPanel(vm, it) { panel = Panel.NONE } }
-                        Panel.TRANSFORM -> targetClip?.let { TransformPanel(vm, it) { panel = Panel.NONE } }
+                        Panel.TRANSFORM -> targetClip?.let { TransformPanel(vm, it, position) { panel = Panel.NONE } }
                         Panel.AUDIO -> targetClip?.let { AudioPanel(vm, it, project.assets[it.assetId]?.hasAudio == true) { panel = Panel.NONE } }
                         Panel.LOOK -> targetClip?.let { LookPanel(vm, it) { panel = Panel.NONE } }
                         Panel.GRADE -> targetClip?.let { GradePanel(vm, it) { panel = Panel.NONE } }
@@ -343,7 +355,10 @@ fun EditorScreen(vm: EditorViewModel, onClose: () -> Unit) {
                             TextPanel(vm, item, project.findText(item.id)?.first?.id == Project.SUBTITLE_TRACK_ID) { panel = Panel.NONE }
                         }
                         Panel.CANVAS -> CanvasPanel(vm, project) { panel = Panel.NONE }
-                        Panel.MEDIA -> MediaPanel(vm, project, state.missingAssetIds, vm.thumbnails, pickVisual, { pickAudio(Project.MUSIC_TRACK_ID) }) { panel = Panel.NONE }
+                        Panel.MEDIA -> MediaPanel(
+                            vm, project, state.missingAssetIds, vm.thumbnails, pickVisual, { pickAudio(Project.MUSIC_TRACK_ID) },
+                            replaceTarget = vm.clip(state.selectedClipId),
+                        ) { panel = Panel.NONE }
                     }
                     if (panel == Panel.NONE) {
                         TabBar(tab) {
@@ -379,6 +394,7 @@ fun EditorScreen(vm: EditorViewModel, onClose: () -> Unit) {
     if (showExport && state.project != null) {
         ExportSheet(vm = vm, exportState = exportState, onDismiss = { if (!exportBusy) { showExport = false; vm.export.reset() } })
     }
+    if (recording) RecordingDialog(vm)
     if (showTracks) {
         state.project?.let { p -> TracksDialog(p, vm::setTrackFlags) { showTracks = false } }
     }
@@ -436,7 +452,7 @@ private fun TopBar(
         ) {
             Text(project.name, style = MaterialTheme.typography.titleSmall, color = MColors.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val (label, color) = when (state.saveStatus) {
-                SaveStatus.SAVED -> "Tersimpan · ${project.canvas.aspect.label}" to MColors.TextFaint
+                SaveStatus.SAVED -> "Tersimpan · ${project.canvas.label}" to MColors.TextFaint
                 SaveStatus.PENDING -> "Menyimpan…" to MColors.TextFaint
                 SaveStatus.ERROR -> "Gagal menyimpan" to MColors.Danger
             }
@@ -494,7 +510,7 @@ private fun PreviewPane(
     onTextTapped: (String) -> Unit,
 ) {
     BoxWithConstraints(modifier.padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
-        val ratio = project.canvas.aspect.ratio
+        val ratio = project.canvas.ratio
         val w = minOf(maxWidth, maxHeight * ratio)
         val h = w / ratio
         var frame by remember { mutableStateOf(IntSize.Zero) }
@@ -564,7 +580,7 @@ private fun PreviewPane(
 @Composable
 private fun TextLayer(vm: EditorViewModel, item: TextItem, frame: IntSize, position: Long, selected: Boolean, onTap: () -> Unit) {
     // Timing and position do not change the pixels, so they must not trigger a re-render.
-    val look = item.copy(startUs = 0L, durationUs = TextItem.MIN_US, x = 0.5f, y = 0.5f)
+    val look = item.copy(startUs = 0L, durationUs = TextItem.MIN_US, x = 0.5f, y = 0.5f, rotation = 0f, opacity = 1f)
     val bitmap = remember(look, frame) { TextRenderer.render(look, frame.width, frame.height).asImageBitmap() }
     val pose = Motion.textPose(item, position)
     val current by rememberUpdatedState(item)
@@ -579,9 +595,10 @@ private fun TextLayer(vm: EditorViewModel, item: TextItem, frame: IntSize, posit
                 )
             }
             .graphicsLayer {
-                alpha = pose.alpha
+                alpha = pose.alpha * item.opacity
                 scaleX = pose.scale
                 scaleY = pose.scale
+                rotationZ = item.rotation
             }
             .then(if (selected) Modifier.border(1.5.dp, MColors.Accent, RoundedCornerShape(4.dp)) else Modifier)
             .clickable(onClickLabel = "Pilih teks", onClick = onTap)
@@ -621,40 +638,61 @@ private fun Transport(
     onFullscreen: () -> Unit,
 ) {
     val fps = project.canvas.frameRate
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f).padding(start = 4.dp)) {
-            Text(Timecode.format(position, fps), style = TimecodeStyle, color = MColors.Text, maxLines = 1)
-            Text(Timecode.format(project.durationUs, fps), style = MaterialTheme.typography.labelSmall, color = MColors.TextFaint, maxLines = 1)
-        }
-        IconAction(MIcons.Stop, "Berhenti dan kembali ke awal", onStop, size = 44.dp, tint = MColors.TextMuted)
-        IconAction(MIcons.StepBack, "Mundur satu frame", { onStep(-1) }, size = 44.dp)
-        Box(
-            Modifier
-                .size(52.dp)
-                .clip(CircleShape)
-                .background(Brush.verticalGradient(listOf(MColors.Surface3, MColors.Surface2)))
-                .border(1.dp, MColors.LineStrong, CircleShape)
-                .clickable(onClickLabel = if (playing) "Jeda" else "Putar", onClick = onToggle),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(if (playing) MIcons.Pause else MIcons.Play, contentDescription = if (playing) "Jeda" else "Putar", tint = MColors.Text, modifier = Modifier.size(24.dp))
-        }
-        IconAction(MIcons.StepForward, "Maju satu frame", { onStep(1) }, size = 44.dp)
-        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { Readout(Timecode.format(position, fps), Timecode.format(project.durationUs, fps)) }
+            IconAction(MIcons.Stop, "Berhenti dan kembali ke awal", onStop, size = 44.dp, tint = MColors.TextMuted)
             Box(
                 Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .clickable(onClickLabel = "Ganti kecepatan pratinjau", onClick = onRate)
-                    .padding(horizontal = 10.dp, vertical = 12.dp),
+                    .padding(horizontal = 6.dp)
+                    .size(52.dp)
+                    .raised(26.dp)
+                    .clickable(onClickLabel = if (playing) "Jeda" else "Putar", onClick = onToggle),
+                contentAlignment = Alignment.Center,
             ) {
-                Text(if (rate == 1f) "1×" else "$rate×".replace(".0×", "×"), style = TimecodeStyle, color = if (rate == 1f) MColors.TextMuted else MColors.AccentBright)
+                Icon(if (playing) MIcons.Pause else MIcons.Play, contentDescription = if (playing) "Jeda" else "Putar", tint = MColors.Text, modifier = Modifier.size(24.dp))
             }
-            IconAction(MIcons.Fullscreen, if (fullscreen) "Keluar dari layar penuh" else "Pratinjau layar penuh", onFullscreen, size = 44.dp, tint = if (fullscreen) MColors.Accent else MColors.TextMuted)
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(onClickLabel = "Ganti kecepatan pratinjau", onClick = onRate)
+                        .padding(horizontal = 10.dp, vertical = 12.dp),
+                ) {
+                    Text(if (rate == 1f) "1×" else "$rate×".replace(".0×", "×"), style = TimecodeStyle, color = if (rate == 1f) MColors.TextMuted else MColors.AccentBright)
+                }
+                IconAction(MIcons.Fullscreen, if (fullscreen) "Keluar dari layar penuh" else "Pratinjau layar penuh", onFullscreen, size = 44.dp, tint = if (fullscreen) MColors.Accent else MColors.TextMuted)
+            }
+        }
+        // Frame-accurate jog: one rib of the wheel is one frame.
+        if (!fullscreen) JogWheel(onStep, Modifier.padding(top = 4.dp, bottom = 2.dp), enabled = project.mainTrack.clips.isNotEmpty())
+    }
+}
+
+/** Shown while a voice-over is being recorded: elapsed time and a clear way to stop or discard. */
+@Composable
+private fun RecordingDialog(vm: EditorViewModel) {
+    var elapsed by remember { mutableStateOf(0L) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            elapsed = vm.recordedMs
+            kotlinx.coroutines.delay(100)
         }
     }
+    AlertDialog(
+        onDismissRequest = { },
+        containerColor = MColors.Surface2,
+        title = { Text("Merekam suara") },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                Readout(Timecode.format(elapsed * 1000L, 10), "mulai dari posisi playhead")
+                Spacer(Modifier.height(10.dp))
+                Text("Bicara ke mikrofon HP. Pratinjau dijeda supaya suaranya tidak ikut terekam.", style = MaterialTheme.typography.bodySmall, color = MColors.TextMuted)
+            }
+        },
+        confirmButton = { TextButton(onClick = { vm.stopVoiceOver(keep = true) }) { Text("Selesai", color = MColors.Accent) } },
+        dismissButton = { TextButton(onClick = { vm.stopVoiceOver(keep = false) }) { Text("Buang", color = MColors.Danger) } },
+    )
 }
 
 @Composable
@@ -709,6 +747,7 @@ private fun ToolRow(
     onTracks: () -> Unit,
     onAddMusic: () -> Unit,
     onAddVoice: () -> Unit,
+    onRecord: () -> Unit,
     onAddText: () -> Unit,
     onAddSubtitle: () -> Unit,
     onEditText: () -> Unit,
@@ -741,6 +780,7 @@ private fun ToolRow(
             ToolTab.AUDIO -> {
                 ToolButton(MIcons.Music, "Musik", onAddMusic, enabled = hasClips)
                 ToolButton(MIcons.Add, "Suara/efek", onAddVoice, enabled = hasClips)
+                ToolButton(MIcons.Mic, "Rekam", onRecord, enabled = hasClips)
                 ToolButton(MIcons.Volume, "Volume", { onPanel(Panel.AUDIO) }, enabled = anyClip)
                 ToolButton(MIcons.Split, "Belah", onSplit, enabled = anyClip)
                 ToolButton(MIcons.Duplicate, "Duplikat", onDuplicate, enabled = anyClip)

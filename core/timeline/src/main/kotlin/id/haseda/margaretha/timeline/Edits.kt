@@ -71,8 +71,28 @@ data class SetClipAudio(
     override val label: String get() = if (muted) "Bisukan klip" else "Ubah audio"
 }
 
-data class SetClipColorLook(val clipId: String, val look: ColorLook) : Edit {
+/** A null [intensity] keeps the clip's current intensity. */
+data class SetClipColorLook(val clipId: String, val look: ColorLook, val intensity: Float? = null) : Edit {
     override val label: String get() = "Warna: ${look.title}"
+}
+
+/** Adds a keyframe at the timeline offset, or replaces the one already there. */
+data class SetKeyframe(val clipId: String, val offsetUs: Long, val transform: Transform) : Edit {
+    override val label: String get() = "Keyframe"
+}
+
+data class RemoveKeyframe(val clipId: String, val offsetUs: Long) : Edit {
+    override val label: String get() = "Hapus keyframe"
+}
+
+/** Removes all keyframes; the clip keeps the pose it had at [keepOffsetUs]. */
+data class ClearKeyframes(val clipId: String, val keepOffsetUs: Long) : Edit {
+    override val label: String get() = "Hapus semua keyframe"
+}
+
+/** Swaps the media behind a clip while keeping its edits. */
+data class ReplaceClipMedia(val clipId: String, val asset: MediaAsset) : Edit {
+    override val label: String get() = "Ganti media"
 }
 
 data class SetClipSpeed(val clipId: String, val speedPermille: Int) : Edit {
@@ -162,7 +182,15 @@ object TimelineEngine {
                 is DeleteClips -> delete(project, edit)
                 is DuplicateClip -> duplicate(project, edit)
                 is SetClipAudio -> setAudio(project, edit)
-                is SetClipColorLook -> updateClip(project, edit.clipId, videoOnly = true) { it.copy(colorLook = edit.look) }
+                is SetClipColorLook -> updateClip(project, edit.clipId, videoOnly = true) {
+                    it.copy(colorLook = edit.look, lookIntensity = edit.intensity ?: it.lookIntensity)
+                }
+                is SetKeyframe -> setKeyframe(project, edit)
+                is RemoveKeyframe -> removeKeyframe(project, edit)
+                is ClearKeyframes -> updateClip(project, edit.clipId, videoOnly = true) {
+                    it.copy(transform = it.transformAtOffsetUs(edit.keepOffsetUs.coerceIn(0L, it.durationUs)), keyframes = emptyList())
+                }
+                is ReplaceClipMedia -> replaceMedia(project, edit)
                 is SetClipSpeed -> setSpeed(project, edit)
                 is SetClipTransform -> updateClip(project, edit.clipId, videoOnly = true) { it.copy(transform = edit.transform, crop = edit.crop) }
                 is SetClipGrade -> updateClip(project, edit.clipId, videoOnly = true) { it.copy(grade = edit.grade) }
@@ -419,6 +447,49 @@ object TimelineEngine {
         if (project.assets[clip.assetId]?.kind == MediaKind.IMAGE) return reject("Gambar tidak punya kecepatan. Ubah durasinya dengan memangkas.")
         if (clip.sourceDurationUs * 1000L / edit.speedPermille < MIN_CLIP_US) return reject("Klip jadi terlalu pendek pada kecepatan itu.")
         return updateClip(project, edit.clipId) { it.copy(speedPermille = edit.speedPermille) }
+    }
+
+    private fun setKeyframe(project: Project, edit: SetKeyframe): EditOutcome {
+        val (_, clip) = project.findClip(edit.clipId) ?: return reject("Klip tidak ditemukan.")
+        if (edit.offsetUs !in 0L..clip.durationUs) return reject("Keyframe harus berada di dalam klip.")
+        val sourceUs = clip.sourceAtOffsetUs(edit.offsetUs)
+        val existing = Keyframes.near(clip.keyframes, sourceUs)
+        if (existing == null && clip.keyframes.size >= Keyframes.MAX_PER_CLIP) return reject("Maksimal ${Keyframes.MAX_PER_CLIP} keyframe per klip.")
+        val kept = clip.keyframes.filterNot { it === existing }
+        val keyframes = (kept + Keyframe(existing?.sourceUs ?: sourceUs, edit.transform)).sortedBy { it.sourceUs }
+        return updateClip(project, edit.clipId, videoOnly = true) { it.copy(keyframes = keyframes) }
+    }
+
+    private fun removeKeyframe(project: Project, edit: RemoveKeyframe): EditOutcome {
+        val (_, clip) = project.findClip(edit.clipId) ?: return reject("Klip tidak ditemukan.")
+        val existing = Keyframes.near(clip.keyframes, clip.sourceAtOffsetUs(edit.offsetUs)) ?: return reject("Tidak ada keyframe di posisi ini.")
+        val rest = clip.keyframes.filterNot { it === existing }
+        // Removing the last keyframe leaves the clip resting in that keyframe's pose.
+        return updateClip(project, edit.clipId, videoOnly = true) {
+            it.copy(keyframes = rest, transform = if (rest.isEmpty()) existing.transform else it.transform)
+        }
+    }
+
+    private fun replaceMedia(project: Project, edit: ReplaceClipMedia): EditOutcome {
+        val (track, clip) = project.findClip(edit.clipId) ?: return reject("Klip tidak ditemukan.")
+        val asset = edit.asset
+        if (asset.id == clip.assetId) return reject("Klip sudah memakai media itu.")
+        if (track.kind == TrackKind.AUDIO) {
+            if (!asset.hasAudio) return reject("\"${asset.displayName}\" tidak memiliki suara.")
+        } else if (!asset.hasVideo || asset.kind == MediaKind.AUDIO) {
+            return reject("\"${asset.displayName}\" tidak memiliki gambar.")
+        }
+        val (assets, problem) = mergeAssets(project, listOf(asset))
+        if (assets == null) return reject(problem ?: "Media tidak valid.")
+        // The clip keeps its timeline length; it starts at the head of the new media.
+        val neededUs = clip.sourceDurationUs
+        if (asset.durationUs < neededUs) return reject("Media pengganti lebih pendek dari klip (${Timecode.short(neededUs)}).")
+        val speed = if (asset.kind == MediaKind.IMAGE) 1000 else clip.speedPermille
+        val sourceLength = clip.durationUs * speed / 1000L
+        val outcome = updateClip(project.copy(assets = assets), edit.clipId) {
+            it.copy(assetId = asset.id, sourceInUs = 0L, sourceOutUs = sourceLength.coerceAtLeast(MIN_CLIP_US), speedPermille = speed, keyframes = emptyList())
+        }
+        return outcome
     }
 
     private fun textProblem(item: TextItem): String? = when {
