@@ -1,7 +1,7 @@
 # Pengujian
 
 ## Otomatis (JVM) — `./gradlew :core:timeline:test`
-61 tes. Hasil harus selalu diambil dari eksekusi saat ini atau CI; jumlah tes bukan bukti bahwa APK terbaru berfungsi.
+65 tes. Hasil harus selalu diambil dari eksekusi saat ini atau CI; jumlah tes bukan bukti bahwa APK terbaru berfungsi.
 - **TimelineEngineTest (17)**, **EditorSessionTest (3)**, **ProjectCodecTest (7)**, **ExportPlannerTest (7)**: perilaku Phase 1 (tata letak, belah, trim, ripple, undo/redo, codec, rencana ekspor).
 - **SpeedTest (4)**: durasi & ripple setelah ubah kecepatan, belah pada klip dipercepat memotong frame sumber yang benar, batas kecepatan, segmen render.
 - **ImageClipTest (1)**: durasi awal foto dan perpanjangan lewat trim.
@@ -10,6 +10,7 @@
 - **TextTrackTest (4)**: tambah/ubah/hapus teks + undo, validasi, trek tersembunyi, impor subtitle tambah/ganti, urutan trek.
 - **SrtTest (3)**: file SRT berantakan (BOM, CRLF, tanpa indeks, tag, tanpa baris kosong), blok rusak dilewati, format bolak-balik.
 - **MotionTest (3)**: kurva fade, status transisi, pose animasi teks.
+- **RenderStructureTest (4)**: klip tanpa edit tidak memakai GPU, tiap edit hanya menyalakan tahap yang perlu, ubah nilai tidak mengubah struktur, lapisan teks tidak pernah bertumpuk.
 - **StudioCodecTest (3)**: semua field baru bolak-balik, migrasi v2 → v3, file tidak konsisten ditolak.
 
 ## Shader — `node tools/shader-test/run.js`

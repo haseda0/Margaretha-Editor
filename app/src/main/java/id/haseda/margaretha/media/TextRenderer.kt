@@ -110,16 +110,6 @@ object TextRenderer {
  */
 @OptIn(UnstableApi::class)
 object TextOverlays {
-    /** Greedy interval colouring: each returned layer has no two texts on screen at once. */
-    fun layers(texts: List<TextItem>): List<List<TextItem>> {
-        val layers = mutableListOf<MutableList<TextItem>>()
-        texts.sortedBy { it.startUs }.forEach { item ->
-            val free = layers.firstOrNull { it.last().endUs <= item.startUs }
-            if (free != null) free += item else layers += mutableListOf(item)
-        }
-        return layers
-    }
-
     /**
      * Overlay effect for one exported item that covers [itemStartUs, itemStartUs + itemDurationUs)
      * of the timeline, or null when no text is visible during it.

@@ -3,7 +3,7 @@
 Legenda: ✅ diimplementasi & lulus tes otomatis · 🟡 diimplementasi & dikompilasi CI, belum dijalankan di perangkat · 📋 direncanakan · ⛔ tidak didukung
 
 > Tidak ada bagian Android yang pernah dijalankan di HP fisik atau emulator. Semua baris 🟡 butuh uji perangkat
-> sebelum dianggap berfungsi. Mesin timeline (✅) diuji 61 tes JVM; shader GLSL diuji 30 pemeriksaan piksel di WebGL.
+> sebelum dianggap berfungsi. Mesin timeline (✅) diuji 65 tes JVM; shader GLSL diuji 30 pemeriksaan piksel di WebGL.
 
 ## Proyek & data
 | Fitur | Status | Catatan |

@@ -374,3 +374,56 @@ class StudioCodecTest {
         fails(ProjectCodec.encode(overlapping))
     }
 }
+
+class RenderStructureTest {
+    private fun seg(change: (Clip) -> Clip = { it }): RenderSegment {
+        val p = projectWith(4.0)
+        val clip = change(p.mainTrack.clips[0])
+        return RenderSegments.of(p.replaceTrack(p.mainTrack.copy(clips = listOf(clip)))).single()
+    }
+
+    @Test
+    fun untouchedClipNeedsNoGpuStage() {
+        assertTrue(EffectStructure.of(seg()).isEmpty)
+        // Audio-only changes never touch the picture pipeline.
+        assertTrue(EffectStructure.of(seg { it.copy(volume = 0.3f, audioFadeInUs = 500_000L, speedPermille = 2000) }).isEmpty)
+    }
+
+    @Test
+    fun eachEditTurnsOnOnlyTheStageItNeeds() {
+        val grade = EffectStructure.of(seg { it.copy(grade = ColorGrade(contrast = 0.2f)) })
+        assertTrue(grade.grade && !grade.blur && !grade.matrix)
+        val blur = EffectStructure.of(seg { it.copy(fx = ClipFx(blur = 0.5f)) })
+        assertTrue(blur.blur && !blur.grade && !blur.matrix)
+        val move = EffectStructure.of(seg { it.copy(transform = Transform(offsetX = 0.2f)) })
+        assertTrue(move.matrix && !move.grade)
+        val dim = EffectStructure.of(seg { it.copy(transform = Transform(opacity = 0.5f)) })
+        assertTrue(dim.grade && !dim.matrix)
+        val slide = EffectStructure.of(seg { it.copy(enter = Transition(TransitionKind.SLIDE)) })
+        assertTrue(slide.matrix && !slide.grade && !slide.blur)
+        val zoom = EffectStructure.of(seg { it.copy(exit = Transition(TransitionKind.ZOOM)) })
+        assertTrue(zoom.matrix && zoom.grade)
+        val blurIn = EffectStructure.of(seg { it.copy(enter = Transition(TransitionKind.BLUR)) })
+        assertTrue(blurIn.blur && blurIn.grade && !blurIn.matrix)
+        assertFalse(EffectStructure.of(seg { it.copy(crop = Crop(left = 0.1f)) }).isEmpty)
+        assertFalse(EffectStructure.of(seg { it.copy(colorLook = ColorLook.WARM) }).isEmpty)
+    }
+
+    @Test
+    fun changingAValueKeepsTheStructure() {
+        val a = EffectStructure.of(seg { it.copy(grade = ColorGrade(exposure = 0.1f), fx = ClipFx(vignette = 0.2f)) })
+        val b = EffectStructure.of(seg { it.copy(grade = ColorGrade(exposure = 0.9f, tint = -0.5f), fx = ClipFx(grain = 1f)) })
+        assertEquals(a, b)
+    }
+
+    @Test
+    fun textLayersNeverShowTwoItemsAtOnce() {
+        fun t(id: String, start: Long, end: Long) = TextItem(id, id, start * 1_000_000L, (end - start) * 1_000_000L)
+        val plan = RenderPlan(emptyList(), emptyList(), listOf(t("a", 0, 4), t("b", 2, 6), t("c", 4, 5), t("d", 6, 8), t("e", 3, 7)), 10_000_000L)
+        val layers = plan.textLayers()
+        assertEquals(3, layers.size)
+        assertEquals(5, layers.sumOf { it.size })
+        layers.forEach { layer -> layer.zipWithNext().forEach { (x, y) -> assertTrue(x.endUs <= y.startUs) } }
+        assertTrue(RenderPlan(emptyList(), emptyList(), emptyList(), 0L).textLayers().isEmpty())
+    }
+}

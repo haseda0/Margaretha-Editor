@@ -11,6 +11,7 @@ import androidx.media3.effect.Presentation
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import id.haseda.margaretha.timeline.AudioSegment
+import id.haseda.margaretha.timeline.EffectStructure
 import id.haseda.margaretha.timeline.Motion
 import id.haseda.margaretha.timeline.RenderPlan
 import id.haseda.margaretha.timeline.RenderSegment
@@ -47,7 +48,7 @@ class PreviewController(private val context: Context, private val scope: Corouti
     private val companions = mutableListOf<CompanionAudio>()
 
     /** Effect chain currently installed on the player, and the clip it reads its values from. */
-    private var installed: StudioEffects.Structure? = null
+    private var installed: EffectStructure? = null
     @Volatile private var liveSegment: RenderSegment? = null
 
     /** User playback rate (0.5×, 1×, 2×) multiplied with each clip's own speed. */
@@ -232,7 +233,7 @@ class PreviewController(private val context: Context, private val scope: Corouti
             installed = null
             return
         }
-        val structure = StudioEffects.structure(seg)
+        val structure = EffectStructure.of(seg)
         // Clips that need the same set of effects share one chain: no pipeline rebuild at the cut.
         if (!force && installed == structure) return
         installed = structure

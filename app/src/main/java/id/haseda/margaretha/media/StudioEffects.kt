@@ -17,6 +17,7 @@ import androidx.media3.effect.GlEffect
 import androidx.media3.effect.GlShaderProgram
 import androidx.media3.effect.MatrixTransformation
 import androidx.media3.effect.Presentation
+import id.haseda.margaretha.timeline.EffectStructure
 import id.haseda.margaretha.timeline.MediaKind
 import id.haseda.margaretha.timeline.Motion
 import id.haseda.margaretha.timeline.RenderSegment
@@ -63,35 +64,11 @@ fun RenderSegment.toMediaItem(): MediaItem {
  */
 @OptIn(UnstableApi::class)
 object StudioEffects {
-    /** What decides which effects exist. Value changes inside the same structure are applied live. */
-    data class Structure(
-        val crop: id.haseda.margaretha.timeline.Crop,
-        val look: id.haseda.margaretha.timeline.ColorLook,
-        val grade: Boolean,
-        val blur: Boolean,
-        val matrix: Boolean,
-    ) {
-        val isEmpty: Boolean get() = crop.isNone && look == id.haseda.margaretha.timeline.ColorLook.ORIGINAL && !grade && !blur && !matrix
-    }
-
-    fun structure(s: RenderSegment): Structure {
-        val kinds = setOf(s.enter.kind, s.exit.kind) - TransitionKind.NONE
-        return Structure(
-            crop = s.crop,
-            look = s.colorLook,
-            grade = !s.grade.isNeutral || s.fx.sharpen > 0f || s.fx.vignette > 0f || s.fx.grain > 0f || s.transform.opacity < 1f ||
-                kinds.any { it != TransitionKind.SLIDE },
-            blur = s.fx.blur > 0f || TransitionKind.BLUR in kinds,
-            matrix = s.transform.copy(opacity = 1f) != id.haseda.margaretha.timeline.Transform.IDENTITY ||
-                TransitionKind.SLIDE in kinds || TransitionKind.ZOOM in kinds,
-        )
-    }
-
     /**
      * @param segment read on every frame, so slider changes show without rebuilding the chain.
      * @param presentation fits the picture to the canvas; required whenever the chain moves the picture.
      */
-    fun build(structure: Structure, segment: () -> RenderSegment, canvasAspect: Float, time: ClipTime, presentation: Presentation?): List<Effect> = buildList {
+    fun build(structure: EffectStructure, segment: () -> RenderSegment, canvasAspect: Float, time: ClipTime, presentation: Presentation?): List<Effect> = buildList {
         val c = structure.crop
         if (!c.isNone) add(Crop(-1f + 2f * c.left, 1f - 2f * c.right, -1f + 2f * c.bottom, 1f - 2f * c.top))
         addAll(colorEffects(structure.look))

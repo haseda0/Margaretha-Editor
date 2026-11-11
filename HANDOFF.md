@@ -3,7 +3,7 @@
 Diperbarui 2026-11-11. Cabang `ccr-7b30104d-htrl4j`, PR #1.
 
 ## Selesai
-- Mesin timeline v3 + 61 tes JVM (`./gradlew :core:timeline:test`).
+- Mesin timeline v3 + 65 tes JVM (`./gradlew :core:timeline:test`).
 - Shader GLSL grade/blur + 30 pemeriksaan piksel (`node tools/shader-test/run.js`).
 - Pipeline render pratinjau/ekspor, UI studio, pustaka media, pengaturan (lihat CHANGELOG 2.0.0).
 - CI diperbaiki (akhiran baris LF).

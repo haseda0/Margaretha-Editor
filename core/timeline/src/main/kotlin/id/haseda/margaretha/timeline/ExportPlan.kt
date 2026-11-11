@@ -40,6 +40,37 @@ data class RenderSegment(
         get() = !transform.isIdentity || !crop.isNone || !grade.isNeutral || !fx.isNone || !enter.isNone || !exit.isNone
 }
 
+/**
+ * Which GPU stages a clip needs. Values inside a stage (how much blur, which grade) can change
+ * without rebuilding the pipeline; only a different structure requires a rebuild.
+ */
+data class EffectStructure(
+    val crop: Crop,
+    val look: ColorLook,
+    val grade: Boolean,
+    val blur: Boolean,
+    val matrix: Boolean,
+) {
+    /** True when the picture can go straight from the decoder to the screen/encoder. */
+    val isEmpty: Boolean get() = crop.isNone && look == ColorLook.ORIGINAL && !grade && !blur && !matrix
+
+    companion object {
+        fun of(s: RenderSegment): EffectStructure {
+            val kinds = setOf(s.enter.kind, s.exit.kind) - TransitionKind.NONE
+            return EffectStructure(
+                crop = s.crop,
+                look = s.colorLook,
+                // Fade, wipe, zoom and blur transitions darken/reveal the picture in the grade stage.
+                grade = !s.grade.isNeutral || s.fx.sharpen > 0f || s.fx.vignette > 0f || s.fx.grain > 0f ||
+                    s.transform.opacity < 1f || kinds.any { it != TransitionKind.SLIDE },
+                blur = s.fx.blur > 0f || TransitionKind.BLUR in kinds,
+                matrix = s.transform.copy(opacity = 1f) != Transform.IDENTITY ||
+                    TransitionKind.SLIDE in kinds || TransitionKind.ZOOM in kinds,
+            )
+        }
+    }
+}
+
 /** A piece of sound on an audio track, already cut to the programme length. */
 data class AudioSegment(
     val clipId: String,
@@ -63,6 +94,19 @@ data class RenderPlan(
     val durationUs: Long,
 ) {
     fun textsAt(timeUs: Long): List<TextItem> = texts.filter { it.containsUs(timeUs) }
+
+    /**
+     * Texts grouped into layers in which no two items are on screen at once (greedy interval
+     * colouring). The exporter draws one overlay per layer, however many cues a layer holds.
+     */
+    fun textLayers(): List<List<TextItem>> {
+        val layers = mutableListOf<MutableList<TextItem>>()
+        texts.sortedBy { it.startUs }.forEach { item ->
+            val free = layers.firstOrNull { it.last().endUs <= item.startUs }
+            if (free != null) free += item else layers += mutableListOf(item)
+        }
+        return layers
+    }
 }
 
 object RenderSegments {

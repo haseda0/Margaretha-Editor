@@ -26,6 +26,7 @@ import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
+import id.haseda.margaretha.timeline.EffectStructure
 import id.haseda.margaretha.timeline.ExportPlan
 import id.haseda.margaretha.timeline.ExportPlanner
 import id.haseda.margaretha.timeline.Timecode
@@ -162,11 +163,11 @@ class ExportEngine(private val context: Context, private val scope: CoroutineSco
     private fun buildComposition(plan: ExportPlan): Composition {
         val presentation = Presentation.createForWidthAndHeight(plan.size.width, plan.size.height, Presentation.LAYOUT_SCALE_TO_FIT)
         val canvasAspect = plan.size.width.toFloat() / plan.size.height
-        val textLayers = TextOverlays.layers(plan.render.texts)
+        val textLayers = plan.render.textLayers()
         val items = plan.segments.map { s ->
             // One clock per item: every time-based effect of the clip measures from its first frame.
             val clock = FrameClock()
-            val video = StudioEffects.build(StudioEffects.structure(s), { s }, canvasAspect, clock, presentation) +
+            val video = StudioEffects.build(EffectStructure.of(s), { s }, canvasAspect, clock, presentation) +
                 listOfNotNull(TextOverlays.effect(textLayers, s.timelineStartUs, s.durationUs, plan.size, clock))
             val audio = AudioFx.chain(s.volume, s.durationUs, s.audioFadeInUs, s.audioFadeOutUs)
             val builder = EditedMediaItem.Builder(s.toMediaItem())
