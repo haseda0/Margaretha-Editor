@@ -9,3 +9,6 @@ captures/
 *.keystore
 *.jks
 backend.properties
+
+# Downloaded at build time
+app/src/main/assets/whisper/

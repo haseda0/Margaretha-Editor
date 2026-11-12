@@ -49,6 +49,7 @@ import id.haseda.margaretha.timeline.Timecode
 import id.haseda.margaretha.ui.HardSwitch
 import id.haseda.margaretha.ui.IconAction
 import id.haseda.margaretha.ui.MColors
+import id.haseda.margaretha.ui.studioBackdrop
 import id.haseda.margaretha.ui.MIcons
 import id.haseda.margaretha.ui.MiniChip
 import id.haseda.margaretha.ui.PanelLabel
@@ -97,7 +98,7 @@ fun SettingsScreen(vm: HomeViewModel, onBack: () -> Unit, onAccount: () -> Unit)
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? -> if (uri != null) vm.adoptFolder(uri) }
     val restorePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? -> if (uri != null) vm.restoreFrom(uri) }
 
-    Box(Modifier.fillMaxSize().background(MColors.Base).windowInsetsPadding(WindowInsets.safeDrawing)) {
+    Box(Modifier.fillMaxSize().studioBackdrop().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Column(Modifier.fillMaxSize().widthIn(max = 640.dp).align(Alignment.TopCenter)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconAction(MIcons.Back, "Kembali", onBack)
@@ -242,6 +243,21 @@ fun SettingsScreen(vm: HomeViewModel, onBack: () -> Unit, onAccount: () -> Unit)
                         AccountState.SignedOut -> "keluar"
                         AccountState.Unconfigured -> "tidak dikonfigurasi"
                     })
+                    var log by remember { mutableStateOf(id.haseda.margaretha.data.ErrorLog.read()) }
+                    Hint(if (log.isEmpty()) "Log error: kosong." else "Log error: ${log.lines().count { it.startsWith("== ") }} catatan.")
+                    if (log.isNotEmpty()) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            QuietButton("Salin log error", {
+                                val cm = context.getSystemService(android.content.ClipboardManager::class.java)
+                                cm?.setPrimaryClip(android.content.ClipData.newPlainText("Margaretha error log", log))
+                                android.widget.Toast.makeText(context, "Log disalin. Tempel ke Claude.", android.widget.Toast.LENGTH_SHORT).show()
+                            })
+                            QuietButton("Hapus log", {
+                                id.haseda.margaretha.data.ErrorLog.clear()
+                                log = ""
+                            })
+                        }
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
             }

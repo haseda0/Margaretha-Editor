@@ -139,6 +139,7 @@ class ExportEngine(
                 }
 
                 override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
+                    id.haseda.margaretha.data.ErrorLog.record("EXPORT ${exportException.errorCodeName}", exportException)
                     stopProgress()
                     transformer = null
                     cleanupTemp()

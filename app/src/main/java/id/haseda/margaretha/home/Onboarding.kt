@@ -34,6 +34,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import id.haseda.margaretha.ui.AccentPill
 import id.haseda.margaretha.ui.MColors
+import id.haseda.margaretha.ui.studioBackdrop
 import id.haseda.margaretha.ui.MIcons
 import id.haseda.margaretha.ui.raised
 
@@ -52,7 +53,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
     var index by rememberSaveable { mutableIntStateOf(0) }
     BackHandler(enabled = index > 0) { index-- }
     val page = PAGES[index]
-    Box(Modifier.fillMaxSize().background(MColors.Base).windowInsetsPadding(WindowInsets.safeDrawing)) {
+    Box(Modifier.fillMaxSize().studioBackdrop().windowInsetsPadding(WindowInsets.safeDrawing)) {
         TextButton(onClick = onDone, modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) { Text("Lewati", color = MColors.TextMuted) }
         Column(
             Modifier.align(Alignment.Center).widthIn(max = 420.dp).padding(horizontal = 32.dp),

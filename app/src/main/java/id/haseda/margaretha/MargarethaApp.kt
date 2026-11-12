@@ -31,6 +31,7 @@ class MargarethaApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        id.haseda.margaretha.data.ErrorLog.install(this)
         container = AppContainer(this)
         container.repository.cleanupStaleTemps()
     }

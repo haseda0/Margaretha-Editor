@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -241,3 +242,16 @@ fun Swatch(color: Color, selected: Boolean, label: String, onClick: () -> Unit) 
 fun PanelLabel(text: String, modifier: Modifier = Modifier) {
     Text(text.uppercase(), style = MaterialTheme.typography.labelSmall, color = MColors.TextFaint, modifier = modifier.padding(top = 10.dp, bottom = 4.dp))
 }
+
+/**
+ * Studio backdrop: deep base with one light source. Warm glow from the top-left, a cooler analog
+ * glow bottom-right and a soft vignette at the bottom, all drawn once behind the content.
+ */
+fun Modifier.studioBackdrop(): Modifier = this
+    .background(MColors.Base)
+    .drawBehind {
+        val d = maxOf(size.width, size.height)
+        drawRect(Brush.radialGradient(listOf(MColors.Accent.copy(alpha = 0.10f), Color.Transparent), center = androidx.compose.ui.geometry.Offset(0f, 0f), radius = d * 0.75f))
+        drawRect(Brush.radialGradient(listOf(MColors.TrackSubtitle.copy(alpha = 0.08f), Color.Transparent), center = androidx.compose.ui.geometry.Offset(size.width, size.height), radius = d * 0.7f))
+        drawRect(Brush.verticalGradient(0.7f to Color.Transparent, 1f to MColors.Abyss.copy(alpha = 0.55f)))
+    }
