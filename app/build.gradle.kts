@@ -27,6 +27,21 @@ android {
         versionName = "2.1.0-studio"
         buildConfigField("String", "SUPABASE_URL", "\"${backendValue("SUPABASE_URL")}\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"${backendValue("SUPABASE_ANON_KEY")}\"")
+        // On-device speech recognition (whisper.cpp) is built for 64-bit ARM phones only.
+        ndk { abiFilters += "arm64-v8a" }
+        externalNativeBuild { cmake { arguments += listOf("-DANDROID_STL=c++_static") } }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    androidResources {
+        // The speech model is memory-copied once on first use; keep it uncompressed in the APK.
+        noCompress += "bin"
     }
 
     signingConfigs {
@@ -95,3 +110,21 @@ dependencies {
 
     testImplementation(libs.junit4)
 }
+
+// Speech model for auto subtitles: downloaded once at build time, never committed to git.
+val whisperModel = layout.projectDirectory.file("src/main/assets/whisper/ggml-base-q5_1.bin").asFile
+val downloadWhisperModel by tasks.registering {
+    val target = whisperModel
+    outputs.file(target)
+    doLast {
+        if (target.exists() && target.length() > 10_000_000) return@doLast
+        target.parentFile.mkdirs()
+        val tmp = File(target.parentFile, target.name + ".part")
+        java.net.URI("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin").toURL().openStream().use { input ->
+            tmp.outputStream().use { input.copyTo(it) }
+        }
+        check(tmp.length() > 10_000_000) { "Whisper model download looks incomplete" }
+        tmp.renameTo(target)
+    }
+}
+tasks.named("preBuild") { dependsOn(downloadWhisperModel) }

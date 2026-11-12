@@ -426,6 +426,42 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun text(textId: String?): TextItem? = textId?.let { _state.value.project?.findText(it)?.second }
 
+    // ---- Auto subtitles (on-device whisper.cpp) ----------------------------------------------
+
+    private val autoSubs = id.haseda.margaretha.media.AutoSubtitles(app)
+    private var autoSubJob: kotlinx.coroutines.Job? = null
+
+    /** Null when idle; 0..1 while transcribing. */
+    private val _autoSubProgress = kotlinx.coroutines.flow.MutableStateFlow<Float?>(null)
+    val autoSubProgress: kotlinx.coroutines.flow.StateFlow<Float?> = _autoSubProgress
+
+    fun autoSubtitle(language: String, replace: Boolean) {
+        val p = session?.project ?: return
+        if (autoSubJob?.isActive == true) return
+        preview.pause()
+        _autoSubProgress.value = 0f
+        autoSubJob = viewModelScope.launch {
+            val result = runCatching {
+                autoSubs.transcribe(RenderSegments.plan(p).video, language) { _autoSubProgress.value = it.coerceIn(0f, 1f) }
+            }
+            _autoSubProgress.value = null
+            result.onFailure { e ->
+                if (e is kotlinx.coroutines.CancellationException) return@launch toast("Subtitle otomatis dibatalkan.")
+                id.haseda.margaretha.data.ErrorLog.record("AUTO-SUBTITLE", e)
+                return@launch toast(e.message ?: "Subtitle otomatis gagal.")
+            }
+            val cues = result.getOrThrow()
+            if (cues.isEmpty()) return@launch toast("Tidak ada ucapan yang terdengar.")
+            val items = Srt.toTextItems(cues, cues.map { newId() })
+            perform(ImportSubtitles(items, replace), toastOnSuccess = "${items.size} subtitle otomatis dibuat. Ketuk untuk mengedit.")
+        }
+    }
+
+    fun cancelAutoSubtitle() {
+        autoSubs.cancel()
+        autoSubJob?.cancel()
+    }
+
     fun importSrt(uri: Uri, replace: Boolean) {
         viewModelScope.launch {
             val text = withContext(Dispatchers.IO) {

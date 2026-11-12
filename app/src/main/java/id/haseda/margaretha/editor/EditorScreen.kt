@@ -121,6 +121,8 @@ fun EditorScreen(vm: EditorViewModel, onClose: () -> Unit) {
     val playing by vm.preview.isPlaying.collectAsStateWithLifecycle()
     val rate by vm.rate.collectAsStateWithLifecycle()
     val previewError by vm.preview.error.collectAsStateWithLifecycle()
+    val autoSubProgress by vm.autoSubProgress.collectAsStateWithLifecycle()
+    var askAutoSub by remember { mutableStateOf(false) }
     val exportState by vm.export.state.collectAsStateWithLifecycle()
     val exportBusy = exportState is ExportState.Running || exportState is ExportState.Verifying
 
@@ -344,6 +346,7 @@ fun EditorScreen(vm: EditorViewModel, onClose: () -> Unit) {
                                 onEditText = { panel = Panel.TEXT },
                                 onImportSrt = { srtPicker.launch(arrayOf("application/x-subrip", "text/plain", "application/octet-stream")) },
                                 onExportSrt = { srtSaver.launch("${project.name}.srt") },
+                                onAutoSubtitle = { askAutoSub = true },
                             )
                         }
                         Panel.SPEED -> targetClip?.let { SpeedPanel(vm, it) { panel = Panel.NONE } }
@@ -399,6 +402,36 @@ fun EditorScreen(vm: EditorViewModel, onClose: () -> Unit) {
     if (recording) RecordingDialog(vm)
     if (showTracks) {
         state.project?.let { p -> TracksDialog(p, vm::setTrackFlags) { showTracks = false } }
+    }
+    if (askAutoSub) {
+        val hasSubs = !state.project?.track(Project.SUBTITLE_TRACK_ID)?.texts.isNullOrEmpty()
+        AutoSubtitleDialog(hasSubs, onDismiss = { askAutoSub = false }) { lang, replace ->
+            askAutoSub = false
+            vm.autoSubtitle(lang, replace)
+        }
+    }
+    autoSubProgress?.let { progress ->
+        AlertDialog(
+            onDismissRequest = {},
+            containerColor = MColors.Surface2,
+            title = { Text("Membuat subtitle otomatis") },
+            text = {
+                Column {
+                    androidx.compose.material3.LinearProgressIndicator(
+                        progress = { progress },
+                        color = MColors.Accent,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        "${(progress * 100).toInt()}% · mendengarkan suara di HP, tanpa internet",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MColors.TextFaint,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = vm::cancelAutoSubtitle) { Text("Batal", color = MColors.Danger) } },
+        )
     }
     askSrtMode?.let { uri ->
         AlertDialog(
@@ -756,6 +789,7 @@ private fun ToolRow(
     onEditText: () -> Unit,
     onImportSrt: () -> Unit,
     onExportSrt: () -> Unit,
+    onAutoSubtitle: () -> Unit,
 ) {
     Row(
         Modifier
@@ -792,6 +826,7 @@ private fun ToolRow(
             }
             ToolTab.TEXT -> {
                 ToolButton(MIcons.Text, "Teks baru", onAddText, enabled = hasClips)
+                ToolButton(MIcons.Sparkle, "Subtitle otomatis", onAutoSubtitle, enabled = hasClips)
                 ToolButton(MIcons.Subtitle, "Subtitle", onAddSubtitle, enabled = hasClips)
                 ToolButton(MIcons.Edit, "Ubah", onEditText, enabled = textSelected)
                 ToolButton(MIcons.Duplicate, "Duplikat", onDuplicate, enabled = textSelected)
@@ -849,4 +884,43 @@ private fun LoadError(reason: String, onBack: () -> Unit) {
         Text(reason, style = MaterialTheme.typography.bodyMedium, color = MColors.TextMuted, modifier = Modifier.padding(vertical = 8.dp))
         QuietButton("Kembali", onBack, icon = MIcons.Back)
     }
+}
+
+
+/** Language and append/replace choice for auto subtitles. */
+@Composable
+private fun AutoSubtitleDialog(hasSubtitles: Boolean, onDismiss: () -> Unit, onStart: (String, Boolean) -> Unit) {
+    val languages = listOf("id" to "Indonesia", "en" to "Inggris", "auto" to "Deteksi otomatis")
+    var lang by remember { mutableStateOf("id") }
+    var replace by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MColors.Surface2,
+        title = { Text("Subtitle otomatis") },
+        text = {
+            Column {
+                Text("Bahasa ucapan di video", style = MaterialTheme.typography.bodySmall, color = MColors.TextFaint)
+                languages.forEach { (code, label) ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { lang = code }.padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.material3.RadioButton(selected = lang == code, onClick = { lang = code })
+                        Text(label, color = MColors.Text)
+                    }
+                }
+                if (hasSubtitles) {
+                    Row(
+                        Modifier.fillMaxWidth().clickable { replace = !replace }.padding(top = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.material3.Checkbox(checked = replace, onCheckedChange = { replace = it })
+                        Text("Ganti subtitle yang sudah ada", color = MColors.Text)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onStart(lang, replace) }) { Text("Mulai", color = MColors.Accent) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } },
+    )
 }
