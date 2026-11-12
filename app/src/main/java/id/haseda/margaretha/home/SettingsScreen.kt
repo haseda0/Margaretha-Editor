@@ -49,6 +49,7 @@ import id.haseda.margaretha.timeline.Timecode
 import id.haseda.margaretha.ui.HardSwitch
 import id.haseda.margaretha.ui.IconAction
 import id.haseda.margaretha.ui.MColors
+import id.haseda.margaretha.ui.studioBackdrop
 import id.haseda.margaretha.ui.MIcons
 import id.haseda.margaretha.ui.MiniChip
 import id.haseda.margaretha.ui.PanelLabel
@@ -97,7 +98,7 @@ fun SettingsScreen(vm: HomeViewModel, onBack: () -> Unit, onAccount: () -> Unit)
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? -> if (uri != null) vm.adoptFolder(uri) }
     val restorePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? -> if (uri != null) vm.restoreFrom(uri) }
 
-    Box(Modifier.fillMaxSize().background(MColors.Base).windowInsetsPadding(WindowInsets.safeDrawing)) {
+    Box(Modifier.fillMaxSize().studioBackdrop().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Column(Modifier.fillMaxSize().widthIn(max = 640.dp).align(Alignment.TopCenter)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconAction(MIcons.Back, "Kembali", onBack)

@@ -50,6 +50,7 @@ import id.haseda.margaretha.home.fieldColors
 import id.haseda.margaretha.ui.AccentPill
 import id.haseda.margaretha.ui.IconAction
 import id.haseda.margaretha.ui.MColors
+import id.haseda.margaretha.ui.studioBackdrop
 import id.haseda.margaretha.ui.MIcons
 import id.haseda.margaretha.ui.MiniChip
 import id.haseda.margaretha.ui.PanelLabel
@@ -66,7 +67,7 @@ private fun passwordProblem(password: String): String? = if (password.length >= 
 @Composable
 private fun AccountFrame(title: String, onBack: () -> Unit, content: @Composable () -> Unit) {
     BackHandler(onBack = onBack)
-    Box(Modifier.fillMaxSize().background(MColors.Base).windowInsetsPadding(WindowInsets.safeDrawing).imePadding()) {
+    Box(Modifier.fillMaxSize().studioBackdrop().windowInsetsPadding(WindowInsets.safeDrawing).imePadding()) {
         Column(Modifier.fillMaxSize().widthIn(max = 520.dp).align(Alignment.TopCenter)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconAction(MIcons.Back, "Kembali", onBack)

@@ -99,6 +99,7 @@ import id.haseda.margaretha.ui.Readout
 import id.haseda.margaretha.ui.raised
 import kotlinx.coroutines.launch
 import id.haseda.margaretha.ui.MColors
+import id.haseda.margaretha.ui.studioBackdrop
 import id.haseda.margaretha.ui.MIcons
 import id.haseda.margaretha.ui.QuietButton
 import id.haseda.margaretha.ui.TimecodeStyle
@@ -226,7 +227,7 @@ fun EditorScreen(vm: EditorViewModel, onClose: () -> Unit) {
             true
         }
 
-    Box(Modifier.fillMaxSize().background(MColors.Base).then(shortcuts)) {
+    Box(Modifier.fillMaxSize().studioBackdrop().then(shortcuts)) {
         val project = state.project
         when {
             state.loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

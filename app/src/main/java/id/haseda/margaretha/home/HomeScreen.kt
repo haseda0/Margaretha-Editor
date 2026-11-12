@@ -72,6 +72,7 @@ import id.haseda.margaretha.timeline.Timecode
 import id.haseda.margaretha.ui.AccentPill
 import id.haseda.margaretha.ui.IconAction
 import id.haseda.margaretha.ui.MColors
+import id.haseda.margaretha.ui.studioBackdrop
 import id.haseda.margaretha.ui.MIcons
 import id.haseda.margaretha.ui.QuietButton
 import id.haseda.margaretha.ui.VideoFrame
@@ -116,7 +117,7 @@ fun HomeScreen(vm: HomeViewModel, onOpen: (String, List<Uri>) -> Unit, onSetting
     Box(
         Modifier
             .fillMaxSize()
-            .background(MColors.Base)
+            .studioBackdrop()
             .drawBehind {
                 // Warm key light top-left, cool fill bottom-right: depth without decoration.
                 drawCircle(Brush.radialGradient(listOf(MColors.Accent.copy(alpha = 0.10f), Color.Transparent), center = Offset(size.width * 0.1f, 0f), radius = size.width * 0.9f), radius = size.width * 0.9f, center = Offset(size.width * 0.1f, 0f))
