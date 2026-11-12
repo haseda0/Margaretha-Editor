@@ -85,7 +85,7 @@ class ProjectCodecTest {
 
     @Test
     fun newerSchemaIsRefusedWithClearMessage() {
-        val text = ProjectCodec.encode(projectWith(2.0)).replace("\"schemaVersion\":2", "\"schemaVersion\":99")
+        val text = ProjectCodec.encode(projectWith(2.0)).replace("\"schemaVersion\":${ProjectCodec.SCHEMA_VERSION}", "\"schemaVersion\":99")
         val r = ProjectCodec.decode(text) as ProjectCodec.DecodeResult.Failure
         assertTrue(r.reason.contains("lebih baru"))
     }

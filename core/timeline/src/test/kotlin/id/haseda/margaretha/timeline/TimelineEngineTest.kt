@@ -115,11 +115,14 @@ class TimelineEngineTest {
     }
 
     @Test
-    fun deleteRipplesAndDropsUnusedAssets() {
+    fun deleteRipplesAndKeepsAssetInLibrary() {
         val p = projectWith(1.0, 2.0, 3.0).applyOk(DeleteClips(setOf("c1")))
         assertEquals(listOf("c0", "c2"), p.mainTrack.clips.map { it.id })
         assertEquals(1_000_000L, p.mainTrack.clips[1].timelineStartUs)
-        assertFalse(p.assets.containsKey("a1"))
+        // The media library keeps the asset until it is removed explicitly.
+        assertTrue(p.assets.containsKey("a1"))
+        assertTrue(TimelineEngine.apply(p, RemoveAsset("a0")) is EditOutcome.Rejected)
+        assertFalse(p.applyOk(RemoveAsset("a1")).assets.containsKey("a1"))
     }
 
     @Test

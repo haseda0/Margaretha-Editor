@@ -14,17 +14,235 @@ data class RenderSegment(
     val endMs: Long,
     val volume: Float,
     val colorLook: ColorLook = ColorLook.ORIGINAL,
+    val kind: MediaKind = MediaKind.VIDEO,
+    val hasAudio: Boolean = true,
+    val speedPermille: Int = 1000,
+    /** Start on the rendered timeline (sum of the previous segments' rendered durations). */
+    val timelineStartUs: Long = 0L,
+    val audioFadeInUs: Long = 0L,
+    val audioFadeOutUs: Long = 0L,
+    val transform: Transform = Transform.IDENTITY,
+    val crop: Crop = Crop.NONE,
+    val grade: ColorGrade = ColorGrade.NEUTRAL,
+    val fx: ClipFx = ClipFx.NONE,
+    val enter: Transition = Transition.NONE,
+    val exit: Transition = Transition.NONE,
+    /** Needed by players to recognise still images behind extension-less content URIs. */
+    val mimeType: String = "",
+    val lookIntensity: Float = 1f,
+    val keyframes: List<Keyframe> = emptyList(),
+) {
+    /** Pose (static or keyframed) at an offset on the rendered timeline inside this segment. */
+    fun transformAt(offsetUs: Long): Transform =
+        Keyframes.poseAt(keyframes, transform, startMs * US_PER_MS + offsetUs.coerceAtLeast(0L) * speedPermille / 1000L)
+
+    /** Rendered duration, after the speed change. */
+    val durationUs: Long get() = (endMs - startMs) * US_PER_MS * 1000L / speedPermille
+    val timelineEndUs: Long get() = timelineStartUs + durationUs
+    val speed: Float get() = speedPermille / 1000f
+
+    /** True when the picture needs no GPU work beyond the colour look. */
+    val hasVisualEdits: Boolean
+        get() = !transform.isIdentity || keyframes.isNotEmpty() || !crop.isNone || !grade.isNeutral || !fx.isNone || !enter.isNone || !exit.isNone
+}
+
+/**
+ * Which GPU stages a clip needs. Values inside a stage (how much blur, which grade) can change
+ * without rebuilding the pipeline; only a different structure requires a rebuild.
+ */
+data class EffectStructure(
+    val crop: Crop,
+    val look: ColorLook,
+    val lookIntensity: Float,
+    val grade: Boolean,
+    val blur: Boolean,
+    val matrix: Boolean,
+) {
+    /** True when the picture can go straight from the decoder to the screen/encoder. */
+    val isEmpty: Boolean get() = crop.isNone && (look == ColorLook.ORIGINAL || lookIntensity <= 0f) && !grade && !blur && !matrix
+
+    companion object {
+        fun of(s: RenderSegment): EffectStructure {
+            val kinds = setOf(s.enter.kind, s.exit.kind) - TransitionKind.NONE
+            val poses = listOf(s.transform) + s.keyframes.map { it.transform }
+            return EffectStructure(
+                crop = s.crop,
+                look = s.colorLook,
+                lookIntensity = if (s.colorLook == ColorLook.ORIGINAL) 1f else s.lookIntensity,
+                // Fade, wipe, zoom and blur transitions darken/reveal the picture in the grade stage.
+                grade = !s.grade.isNeutral || s.fx.sharpen > 0f || s.fx.vignette > 0f || s.fx.grain > 0f ||
+                    poses.any { it.opacity < 1f } || kinds.any { it != TransitionKind.SLIDE },
+                blur = s.fx.blur > 0f || TransitionKind.BLUR in kinds,
+                matrix = poses.any { it.copy(opacity = 1f) != Transform.IDENTITY } ||
+                    TransitionKind.SLIDE in kinds || TransitionKind.ZOOM in kinds,
+            )
+        }
+    }
+}
+
+/** A piece of sound on an audio track, already cut to the programme length. */
+data class AudioSegment(
+    val clipId: String,
+    val uri: String,
+    val startMs: Long,
+    val endMs: Long,
+    val timelineStartUs: Long,
+    val volume: Float,
+    val fadeInUs: Long = 0L,
+    val fadeOutUs: Long = 0L,
 ) {
     val durationUs: Long get() = (endMs - startMs) * US_PER_MS
+    val timelineEndUs: Long get() = timelineStartUs + durationUs
+}
+
+/** Everything the preview and the exporter render, derived from one [Project] snapshot. */
+data class RenderPlan(
+    val video: List<RenderSegment>,
+    val audioTracks: List<List<AudioSegment>>,
+    val texts: List<TextItem>,
+    val durationUs: Long,
+) {
+    fun textsAt(timeUs: Long): List<TextItem> = texts.filter { it.containsUs(timeUs) }
+
+    /**
+     * Texts grouped into layers in which no two items are on screen at once (greedy interval
+     * colouring). The exporter draws one overlay per layer, however many cues a layer holds.
+     */
+    fun textLayers(): List<List<TextItem>> {
+        val layers = mutableListOf<MutableList<TextItem>>()
+        texts.sortedBy { it.startUs }.forEach { item ->
+            val free = layers.firstOrNull { it.last().endUs <= item.startUs }
+            if (free != null) free += item else layers += mutableListOf(item)
+        }
+        return layers
+    }
 }
 
 object RenderSegments {
     /** Millisecond rounding is shared by preview and export: adjacent split pieces stay gapless. */
-    fun of(project: Project): List<RenderSegment> = project.mainTrack.clips.mapNotNull { clip ->
-        val asset = project.assets[clip.assetId] ?: return@mapNotNull null
+    fun of(project: Project): List<RenderSegment> {
+        var cursor = 0L
+        return project.mainTrack.clips.mapNotNull { clip ->
+            val asset = project.assets[clip.assetId] ?: return@mapNotNull null
+            val start = clip.sourceInUs / US_PER_MS
+            val end = clip.sourceOutUs / US_PER_MS
+            if (end <= start) return@mapNotNull null
+            RenderSegment(
+                clipId = clip.id,
+                uri = asset.uri,
+                startMs = start,
+                endMs = end,
+                volume = if (asset.hasAudio) clip.effectiveVolume else 0f,
+                colorLook = clip.colorLook,
+                kind = asset.kind,
+                hasAudio = asset.hasAudio,
+                speedPermille = clip.speedPermille,
+                timelineStartUs = cursor,
+                audioFadeInUs = clip.audioFadeInUs,
+                audioFadeOutUs = clip.audioFadeOutUs,
+                transform = clip.transform,
+                crop = clip.crop,
+                grade = clip.grade,
+                fx = clip.fx,
+                enter = clip.enter,
+                exit = clip.exit,
+                mimeType = asset.mimeType,
+                lookIntensity = clip.lookIntensity,
+                keyframes = clip.keyframes,
+            ).also { cursor += it.durationUs }
+        }
+    }
+
+    fun plan(project: Project): RenderPlan {
+        val video = of(project)
+        val total = video.lastOrNull()?.timelineEndUs ?: 0L
+        val audio = project.audioTracks.filter { it.enabled }.map { track ->
+            track.clips.sortedBy { it.timelineStartUs }.mapNotNull { clip -> audioSegment(project, clip, total) }
+        }.filter { it.isNotEmpty() }
+        val texts = project.tracks.filter { it.isTextual && it.enabled }.flatMap { it.texts }
+            .filter { it.startUs < total }
+            .mapNotNull { item ->
+                val duration = minOf(item.durationUs, total - item.startUs)
+                if (duration < TextItem.MIN_US) null else if (duration == item.durationUs) item else item.copy(durationUs = duration)
+            }
+        return RenderPlan(video, audio, texts, total)
+    }
+
+    private fun audioSegment(project: Project, clip: Clip, totalUs: Long): AudioSegment? {
+        val asset = project.assets[clip.assetId] ?: return null
+        if (!asset.hasAudio || clip.effectiveVolume <= 0f || clip.timelineStartUs >= totalUs) return null
         val start = clip.sourceInUs / US_PER_MS
-        val end = clip.sourceOutUs / US_PER_MS
-        if (end <= start) null else RenderSegment(clip.id, asset.uri, start, end, clip.effectiveVolume, clip.colorLook)
+        var end = clip.sourceOutUs / US_PER_MS
+        val overshootUs = clip.timelineStartUs + (end - start) * US_PER_MS - totalUs
+        if (overshootUs > 0) end -= (overshootUs + US_PER_MS - 1) / US_PER_MS
+        if (end - start < 20) return null
+        return AudioSegment(clip.id, asset.uri, start, end, clip.timelineStartUs, clip.effectiveVolume, clip.audioFadeInUs, clip.audioFadeOutUs)
+    }
+}
+
+/**
+ * Time-based maths shared by the preview (drawn by the UI) and the export (drawn by GPU/audio
+ * processors). Keeping it here means both pipelines animate identically and it is unit-tested.
+ */
+object Motion {
+    /** Linear fade gain 0..1 at [offsetUs] inside something [durationUs] long. */
+    fun fadeGain(offsetUs: Long, durationUs: Long, fadeInUs: Long, fadeOutUs: Long): Float {
+        if (durationUs <= 0) return 1f
+        // Fades never overlap: each is capped at half of the clip.
+        val fin = fadeInUs.coerceIn(0L, durationUs / 2)
+        val fout = fadeOutUs.coerceIn(0L, durationUs / 2)
+        val t = offsetUs.coerceIn(0L, durationUs)
+        var gain = 1f
+        if (fin > 0 && t < fin) gain = t.toFloat() / fin
+        if (fout > 0 && t > durationUs - fout) gain = minOf(gain, (durationUs - t).toFloat() / fout)
+        return gain.coerceIn(0f, 1f)
+    }
+
+    data class TransitionState(val kind: TransitionKind, val visibility: Float, val entering: Boolean) {
+        val isIdle: Boolean get() = kind == TransitionKind.NONE || visibility >= 1f
+    }
+
+    val IDLE = TransitionState(TransitionKind.NONE, 1f, true)
+
+    /** Which transition is active at [offsetUs] of a segment and how visible the picture is (eased 0..1). */
+    fun transition(segment: RenderSegment, offsetUs: Long): TransitionState {
+        val d = segment.durationUs
+        val t = offsetUs.coerceIn(0L, d)
+        val enterUs = if (segment.enter.isNone) 0L else segment.enter.durationUs.coerceAtMost(d / 2)
+        val exitUs = if (segment.exit.isNone) 0L else segment.exit.durationUs.coerceAtMost(d / 2)
+        return when {
+            enterUs > 0 && t < enterUs -> TransitionState(segment.enter.kind, ease(t.toFloat() / enterUs), entering = true)
+            exitUs > 0 && t > d - exitUs -> TransitionState(segment.exit.kind, ease((d - t).toFloat() / exitUs), entering = false)
+            else -> IDLE
+        }
+    }
+
+    /** Smoothstep: gentle start and stop. */
+    fun ease(x: Float): Float {
+        val c = x.coerceIn(0f, 1f)
+        return c * c * (3f - 2f * c)
+    }
+
+    data class TextPose(val alpha: Float, val offsetY: Float, val scale: Float)
+
+    private const val TEXT_ANIM_US = 300_000L
+
+    /** Pose of an animated text at [timeUs]; offsetY is a fraction of the frame height (+ = down). */
+    fun textPose(item: TextItem, timeUs: Long): TextPose {
+        val anim = minOf(TEXT_ANIM_US, item.durationUs / 2)
+        val t = timeUs - item.startUs
+        val k = when {
+            item.animation == TextAnimation.NONE || anim <= 0 -> 1f
+            t < anim -> ease(t.toFloat() / anim)
+            t > item.durationUs - anim -> ease((item.durationUs - t).toFloat() / anim)
+            else -> 1f
+        }
+        return when (item.animation) {
+            TextAnimation.NONE -> TextPose(1f, 0f, 1f)
+            TextAnimation.FADE -> TextPose(k, 0f, 1f)
+            TextAnimation.SLIDE_UP -> TextPose(k, (1f - k) * 0.05f, 1f)
+            TextAnimation.POP -> TextPose(k, 0f, 0.7f + 0.3f * k)
+        }
     }
 }
 
@@ -36,6 +254,7 @@ enum class ResolutionPreset(val shortSide: Int, val label: String) {
 }
 
 enum class QualityPreset(val label: String, val bitsPerPixel: Double) {
+    DRAFT("Draf", 0.045),
     STANDARD("Standar", 0.08),
     HIGH("Kualitas Tinggi", 0.12),
     MAXIMUM("Maksimum", 0.18),
@@ -67,6 +286,7 @@ data class OutputSize(val width: Int, val height: Int) {
 
 data class ExportPlan(
     val segments: List<RenderSegment>,
+    val render: RenderPlan,
     val size: OutputSize,
     val frameRate: Int,
     val videoMimeType: String,
@@ -86,6 +306,16 @@ object ExportPlanner {
     const val MAX_VIDEO_BITRATE = 100_000_000
 
     /** Output size for the canvas aspect at the requested short side, both sides even. */
+    /** Output size for a canvas: the preset decides the short side, the canvas decides the shape. */
+    fun outputSize(canvas: Canvas, resolution: ResolutionPreset): OutputSize {
+        if (!canvas.isCustom) return outputSize(canvas.aspect, resolution)
+        val short = resolution.shortSide
+        val w = canvas.customWidth
+        val h = canvas.customHeight
+        val longSide = even((short.toDouble() * maxOf(w, h) / minOf(w, h)).roundToInt())
+        return if (w >= h) OutputSize(longSide, short) else OutputSize(short, longSide)
+    }
+
     fun outputSize(aspect: AspectRatio, resolution: ResolutionPreset): OutputSize {
         val short = resolution.shortSide
         val longSide = even((short.toDouble() * maxOf(aspect.width, aspect.height) / minOf(aspect.width, aspect.height)).roundToInt())
@@ -111,13 +341,16 @@ object ExportPlanner {
         if (clips.isEmpty()) return PlanOutcome.Invalid("Timeline masih kosong. Tambahkan video dulu.")
         val missing = clips.firstOrNull { project.assets[it.assetId] == null }
         if (missing != null) return PlanOutcome.Invalid("Ada klip yang media sumbernya hilang.")
-        val segments = RenderSegments.of(project)
-        val size = outputSize(project.canvas.aspect, settings.resolution)
+        val render = RenderSegments.plan(project)
+        val segments = render.video
+        if (segments.isEmpty()) return PlanOutcome.Invalid("Tidak ada klip yang bisa dirender.")
+        val size = outputSize(project.canvas, settings.resolution)
         val vb = videoBitrate(settings, size)
         val duration = segments.sumOf { it.durationUs }
         return PlanOutcome.Ready(
             ExportPlan(
                 segments = segments,
+                render = render,
                 size = size,
                 frameRate = settings.frameRate,
                 videoMimeType = settings.codec.mimeType,

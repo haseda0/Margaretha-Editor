@@ -3,15 +3,26 @@ package id.haseda.margaretha
 import android.app.Application
 import android.content.ComponentCallbacks2
 import android.content.Context
+import id.haseda.margaretha.account.AccountRepository
+import id.haseda.margaretha.account.SessionStore
+import id.haseda.margaretha.data.AppSettings
+import id.haseda.margaretha.data.ExportHistory
+import id.haseda.margaretha.data.UserStorage
 import id.haseda.margaretha.data.ProjectRepository
 import id.haseda.margaretha.media.MediaProbe
 import id.haseda.margaretha.media.ThumbnailCache
+import id.haseda.margaretha.media.WaveformCache
 
 /** Manual dependency container — the graph is small enough that a DI framework is not justified. */
 class AppContainer(context: Context) {
     val repository = ProjectRepository(context)
     val probe = MediaProbe(context)
     val thumbnails = ThumbnailCache(context)
+    val settings = AppSettings(context)
+    val waveforms = WaveformCache(context)
+    val storage = UserStorage(context, settings)
+    val exportHistory = ExportHistory(context)
+    val account = AccountRepository(SessionStore(context))
 }
 
 class MargarethaApp : Application() {
@@ -27,6 +38,9 @@ class MargarethaApp : Application() {
     @Suppress("DEPRECATION")
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) container.thumbnails.trim()
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) {
+            container.thumbnails.trim()
+            container.waveforms.trim()
+        }
     }
 }

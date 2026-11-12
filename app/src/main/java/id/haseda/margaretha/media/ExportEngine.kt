@@ -11,14 +11,11 @@ import android.os.StatFs
 import android.provider.MediaStore
 import androidx.annotation.OptIn
 import androidx.core.content.FileProvider
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
-import androidx.media3.common.audio.AudioProcessor
-import androidx.media3.common.audio.ChannelMixingAudioProcessor
-import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.Presentation
-import id.haseda.margaretha.media.colorEffects
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EditedMediaItem
@@ -29,6 +26,12 @@ import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
+import id.haseda.margaretha.data.AppSettings
+import id.haseda.margaretha.data.ExportDestination
+import id.haseda.margaretha.data.ExportHistory
+import id.haseda.margaretha.data.ExportRecord
+import id.haseda.margaretha.data.UserStorage
+import id.haseda.margaretha.timeline.EffectStructure
 import id.haseda.margaretha.timeline.ExportPlan
 import id.haseda.margaretha.timeline.ExportPlanner
 import id.haseda.margaretha.timeline.Timecode
@@ -48,7 +51,10 @@ import java.io.IOException
 
 data class ExportOutput(
     val uri: Uri,
+    val fileName: String,
     val locationLabel: String,
+    /** Set when the file could not go where the user asked and was saved elsewhere instead. */
+    val note: String?,
     val sizeBytes: Long,
     val durationUs: Long,
     val width: Int,
@@ -70,7 +76,13 @@ sealed interface ExportState {
  * cancelled export never leaves a partial file behind.
  */
 @OptIn(UnstableApi::class)
-class ExportEngine(private val context: Context, private val scope: CoroutineScope) {
+class ExportEngine(
+    private val context: Context,
+    private val scope: CoroutineScope,
+    private val settings: AppSettings,
+    private val storage: UserStorage,
+    private val history: ExportHistory,
+) {
     private val _state = MutableStateFlow<ExportState>(ExportState.Idle)
     val state: StateFlow<ExportState> = _state.asStateFlow()
 
@@ -80,8 +92,14 @@ class ExportEngine(private val context: Context, private val scope: CoroutineSco
 
     val isBusy: Boolean get() = _state.value is ExportState.Running || _state.value is ExportState.Verifying
 
+    /** Where the next export will be saved, as the user would describe it. */
     val locationLabel: String
-        get() = if (Build.VERSION.SDK_INT >= 29) "Galeri › Movies/$FOLDER" else "Penyimpanan aplikasi › Movies (bisa dibagikan)"
+        get() = when {
+            settings.exportDestination == ExportDestination.FOLDER && storage.isReady ->
+                "Folder pilihan › ${UserStorage.ROOT}/${UserStorage.EXPORTS}"
+            Build.VERSION.SDK_INT >= 29 -> "Galeri › Movies/$FOLDER"
+            else -> "Penyimpanan aplikasi › Movies (bisa dibagikan)"
+        }
 
     fun start(plan: ExportPlan, baseName: String) {
         if (isBusy) return
@@ -164,36 +182,46 @@ class ExportEngine(private val context: Context, private val scope: CoroutineSco
 
     private fun buildComposition(plan: ExportPlan): Composition {
         val presentation = Presentation.createForWidthAndHeight(plan.size.width, plan.size.height, Presentation.LAYOUT_SCALE_TO_FIT)
+        val canvasAspect = plan.size.width.toFloat() / plan.size.height
+        val textLayers = plan.render.textLayers()
         val items = plan.segments.map { s ->
-            val mediaItem = MediaItem.Builder()
-                .setUri(s.uri)
-                .setClippingConfiguration(
-                    MediaItem.ClippingConfiguration.Builder()
-                        .setStartPositionMs(s.startMs)
-                        .setEndPositionMs(s.endMs)
-                        .build(),
-                )
-                .build()
-            val audio: List<AudioProcessor> = if (s.volume < 1f) listOf(volumeProcessor(s.volume)) else emptyList()
-            EditedMediaItem.Builder(mediaItem)
+            // One clock per item: every time-based effect of the clip measures from its first frame.
+            val clock = FrameClock()
+            val video = StudioEffects.build(EffectStructure.of(s), { s }, canvasAspect, clock, presentation) +
+                listOfNotNull(TextOverlays.effect(textLayers, s.timelineStartUs, s.durationUs, plan.size, clock))
+            val audio = AudioFx.chain(s.volume, s.durationUs, s.audioFadeInUs, s.audioFadeOutUs)
+            val builder = EditedMediaItem.Builder(s.toMediaItem())
                 .setFrameRate(plan.frameRate)
-                .setEffects(Effects(audio, colorEffects(s.colorLook) + presentation))
-                .build()
+                .setEffects(Effects(audio, video))
+            if (s.speedPermille != 1000) builder.setSpeed(AudioFx.constantSpeed(s.speed))
+            builder.build()
         }
         // Audio+video track types: clips without sound contribute silence, keeping A/V in sync.
-        val sequence = EditedMediaItemSequence.withAudioAndVideoFrom(items)
-        return Composition.Builder(sequence)
+        val main = EditedMediaItemSequence.withAudioAndVideoFrom(items)
+        val audioTracks = plan.render.audioTracks.map { track ->
+            val sequence = EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO))
+            var cursor = 0L
+            track.forEach { a ->
+                if (a.timelineStartUs > cursor) sequence.addGap(a.timelineStartUs - cursor)
+                val mediaItem = MediaItem.Builder()
+                    .setUri(a.uri)
+                    .setClippingConfiguration(
+                        MediaItem.ClippingConfiguration.Builder().setStartPositionMs(a.startMs).setEndPositionMs(a.endMs).build(),
+                    )
+                    .build()
+                sequence.addItem(
+                    EditedMediaItem.Builder(mediaItem)
+                        .setRemoveVideo(true)
+                        .setEffects(Effects(AudioFx.chain(a.volume, a.durationUs, a.fadeInUs, a.fadeOutUs), emptyList()))
+                        .build(),
+                )
+                cursor = a.timelineEndUs
+            }
+            sequence.build()
+        }
+        return Composition.Builder(listOf(main) + audioTracks)
             .setHdrMode(Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL)
             .build()
-    }
-
-    /**
-     * Gain stage: mono/stereo keep their layout (identity matrix scaled by the clip volume);
-     * 3–6 channel sources are downmixed to stereo at constant power, then scaled.
-     */
-    private fun volumeProcessor(volume: Float): AudioProcessor = ChannelMixingAudioProcessor().apply {
-        for (channels in 1..2) putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(channels, channels).scaleBy(volume))
-        for (channels in 3..6) putChannelMixingMatrix(ChannelMixingMatrix.createForConstantPower(channels, 2).scaleBy(volume))
     }
 
     private suspend fun finish(file: File, plan: ExportPlan, baseName: String, startedAt: Long) {
@@ -204,7 +232,11 @@ class ExportEngine(private val context: Context, private val scope: CoroutineSco
             return
         }
         try {
-            val output = withContext(Dispatchers.IO) { publish(file, baseName, plan) }
+            val output = withContext(Dispatchers.IO) {
+                publish(file, baseName, plan).also { o ->
+                    history.add(ExportRecord(o.fileName, o.uri.toString(), o.locationLabel, o.sizeBytes, o.durationUs, o.width, o.height, System.currentTimeMillis()))
+                }
+            }
             _state.value = ExportState.Success(output, System.currentTimeMillis() - startedAt)
         } catch (e: Exception) {
             _state.value = ExportState.Failed("Video selesai dirender tetapi gagal disimpan ke galeri.", e.toString())
@@ -237,6 +269,16 @@ class ExportEngine(private val context: Context, private val scope: CoroutineSco
         val (w, h, durUs) = readShape(file, plan)
         val displayName = "${safeName(baseName)}_${System.currentTimeMillis() / 1000}.mp4"
         val size = file.length()
+        var note: String? = null
+        if (settings.exportDestination == ExportDestination.FOLDER) {
+            try {
+                val uri = storage.write(listOf(UserStorage.EXPORTS), displayName, "video/mp4") { out -> file.inputStream().use { it.copyTo(out) } }
+                return ExportOutput(uri, displayName, "Folder pilihan › ${UserStorage.ROOT}/${UserStorage.EXPORTS}/$displayName", null, size, durUs, w, h)
+            } catch (e: IOException) {
+                // The render is good; do not lose it because the chosen folder went away.
+                note = "Folder pilihan tidak bisa dipakai (${e.message}). Video disimpan ke Galeri."
+            }
+        }
         if (Build.VERSION.SDK_INT >= 29) {
             val resolver = context.contentResolver
             val values = ContentValues().apply {
@@ -257,13 +299,13 @@ class ExportEngine(private val context: Context, private val scope: CoroutineSco
                 resolver.delete(uri, null, null)
                 throw e
             }
-            return ExportOutput(uri, "Movies/$FOLDER/$displayName", size, durUs, w, h)
+            return ExportOutput(uri, displayName, "Movies/$FOLDER/$displayName", note, size, durUs, w, h)
         } else {
             val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "").apply { mkdirs() }
             val target = File(dir, displayName)
             file.copyTo(target, overwrite = true)
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", target)
-            return ExportOutput(uri, target.absolutePath, size, durUs, w, h)
+            return ExportOutput(uri, displayName, target.absolutePath, note, size, durUs, w, h)
         }
     }
 

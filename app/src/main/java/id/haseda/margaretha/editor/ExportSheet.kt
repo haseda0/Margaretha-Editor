@@ -147,7 +147,7 @@ private fun Options(vm: EditorViewModel, exportState: ExportState) {
     Section("Resolusi")
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ResolutionPreset.entries.forEach { r ->
-            val size = ExportPlanner.outputSize(project.canvas.aspect, r)
+            val size = ExportPlanner.outputSize(project.canvas, r)
             val ok = r in options.supportedResolutions
             OptionChip(r.label, settings.resolution == r, { set(settings.copy(resolution = r)) }, enabled = ok, sub = if (ok) size.toString() else "tak didukung")
         }
@@ -289,8 +289,10 @@ private fun Success(state: ExportState.Success, onPlay: () -> Unit, onDone: () -
     ) {
         Info("Ukuran", "${out.width}×${out.height}")
         Info("Durasi", Timecode.format(out.durationUs))
-        Info("File", Timecode.bytes(out.sizeBytes))
+        Info("Ukuran file", Timecode.bytes(out.sizeBytes))
+        Info("Nama file", out.fileName)
         Info("Lokasi", out.locationLabel)
+        out.note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MColors.Warning, modifier = Modifier.padding(vertical = 4.dp)) }
     }
     Spacer(Modifier.height(16.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
@@ -336,47 +338,6 @@ private fun ExportedPlayer(output: ExportOutput, onClose: () -> Unit) {
                     .heightIn(max = 560.dp)
                     .aspectRatio(ratio, matchHeightConstraintsFirst = true),
             )
-        }
-    }
-}
-
-/** Per-clip audio: volume 0–100% and mute; committed as one undoable edit. */
-@kotlin.OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun VolumeSheet(clip: Clip, onDismiss: () -> Unit, onApply: (Float, Boolean) -> Unit) {
-    var volume by remember(clip.id) { mutableFloatStateOf(clip.volume) }
-    var muted by remember(clip.id) { mutableStateOf(clip.muted) }
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MColors.Surface1) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 16.dp)) {
-            Text("Audio klip", style = MaterialTheme.typography.headlineSmall, color = MColors.Text)
-            Spacer(Modifier.height(16.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(if (muted) MIcons.Mute else MIcons.Volume, contentDescription = null, tint = MColors.TextMuted)
-                Spacer(Modifier.width(12.dp))
-                Slider(
-                    value = volume,
-                    onValueChange = { volume = it },
-                    enabled = !muted,
-                    modifier = Modifier.weight(1f),
-                    colors = SliderDefaults.colors(thumbColor = MColors.Accent, activeTrackColor = MColors.Accent, inactiveTrackColor = MColors.Surface3),
-                )
-                Spacer(Modifier.width(12.dp))
-                Text("${(volume * 100).toInt()}%", style = MaterialTheme.typography.labelLarge, color = MColors.Text, modifier = Modifier.width(44.dp))
-            }
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { muted = !muted }.padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Bisukan audio asli", style = MaterialTheme.typography.bodyLarge, color = MColors.Text, modifier = Modifier.weight(1f))
-                Switch(
-                    checked = muted,
-                    onCheckedChange = { muted = it },
-                    colors = SwitchDefaults.colors(checkedTrackColor = MColors.Accent, checkedThumbColor = MColors.OnAccent),
-                )
-            }
-            Text("Berlaku sama di pratinjau dan hasil ekspor.", style = MaterialTheme.typography.bodySmall, color = MColors.TextFaint)
-            Spacer(Modifier.height(16.dp))
-            AccentPill("Terapkan", { onApply((volume * 100).toInt() / 100f, muted) }, modifier = Modifier.fillMaxWidth())
         }
     }
 }
