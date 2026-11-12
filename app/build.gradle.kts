@@ -30,7 +30,7 @@ android {
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"${backendValue("SUPABASE_ANON_KEY")}\"")
         // On-device speech recognition (whisper.cpp) is built for 64-bit ARM phones only.
         ndk { abiFilters += "arm64-v8a" }
-        externalNativeBuild { cmake { arguments += listOf("-DANDROID_STL=c++_static") } }
+        externalNativeBuild { cmake { arguments += listOf("-DANDROID_STL=c++_static", "-DWHISPER_DIR=${layout.buildDirectory.get().asFile}/whisper-src/whisper.cpp-1.7.6") } }
     }
 
     externalNativeBuild {
@@ -128,4 +128,18 @@ val downloadWhisperModel by tasks.registering {
         tmp.renameTo(target)
     }
 }
-tasks.named("preBuild") { dependsOn(downloadWhisperModel) }
+val downloadWhisperSource by tasks.registering {
+    val dir = layout.buildDirectory.dir("whisper-src").get().asFile
+    outputs.dir(dir)
+    doLast {
+        if (File(dir, "whisper.cpp-1.7.6/CMakeLists.txt").exists()) return@doLast
+        dir.mkdirs()
+        val tar = File(dir, "whisper.tar.gz")
+        URI("https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.7.6.tar.gz").toURL().openStream().use { input ->
+            tar.outputStream().use { input.copyTo(it) }
+        }
+        val proc = ProcessBuilder("tar", "-xzf", tar.absolutePath, "-C", dir.absolutePath).inheritIO().start()
+        check(proc.waitFor() == 0) { "whisper.cpp source extract failed" }
+    }
+}
+tasks.named("preBuild") { dependsOn(downloadWhisperModel, downloadWhisperSource) }
