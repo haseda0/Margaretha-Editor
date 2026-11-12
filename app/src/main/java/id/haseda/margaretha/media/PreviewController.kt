@@ -58,6 +58,9 @@ class PreviewController(private val context: Context, private val scope: Corouti
             applyItemState()
         }
 
+    /** Set after the effect pipeline failed on this device: preview plays without GPU effects. */
+    private var safeMode = false
+
     /** Before/after: when true the picture is shown without colour work, effects or transforms. */
     var bypassEffects: Boolean = false
         set(value) {
@@ -97,6 +100,19 @@ class PreviewController(private val context: Context, private val scope: Corouti
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                // Many devices cannot run the GPU effect pipeline. Fall back to plain playback once
+                // instead of leaving a black, frozen preview.
+                if (!safeMode && segments.isNotEmpty()) {
+                    safeMode = true
+                    val t = _positionUs.value
+                    installed = null
+                    player.setVideoEffects(emptyList())
+                    val (index, offset) = locate(t.coerceIn(0L, (totalUs - 1).coerceAtLeast(0L)))
+                    player.setMediaItems(segments.map { it.toMediaItem() }, index, sourceMs(index, offset))
+                    player.prepare()
+                    _error.value = "Efek pratinjau tidak didukung HP ini; video diputar tanpa efek (hasil ekspor tetap memakai efek)."
+                    return
+                }
                 _error.value = "Pratinjau gagal: ${error.errorCodeName}"
             }
         })
@@ -228,7 +244,7 @@ class PreviewController(private val context: Context, private val scope: Corouti
     private fun applyEffects(force: Boolean, index: Int = player.currentMediaItemIndex) {
         val seg = segments.getOrNull(index)
         liveSegment = seg
-        if (seg == null || bypassEffects) {
+        if (seg == null || bypassEffects || safeMode) {
             if (installed?.isEmpty == false || force) player.setVideoEffects(emptyList())
             installed = null
             return
