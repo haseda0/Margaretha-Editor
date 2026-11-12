@@ -242,6 +242,21 @@ fun SettingsScreen(vm: HomeViewModel, onBack: () -> Unit, onAccount: () -> Unit)
                         AccountState.SignedOut -> "keluar"
                         AccountState.Unconfigured -> "tidak dikonfigurasi"
                     })
+                    var log by remember { mutableStateOf(id.haseda.margaretha.data.ErrorLog.read()) }
+                    Hint(if (log.isEmpty()) "Log error: kosong." else "Log error: ${log.lines().count { it.startsWith("== ") }} catatan.")
+                    if (log.isNotEmpty()) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            QuietButton("Salin log error", {
+                                val cm = context.getSystemService(android.content.ClipboardManager::class.java)
+                                cm?.setPrimaryClip(android.content.ClipData.newPlainText("Margaretha error log", log))
+                                android.widget.Toast.makeText(context, "Log disalin. Tempel ke Claude.", android.widget.Toast.LENGTH_SHORT).show()
+                            })
+                            QuietButton("Hapus log", {
+                                id.haseda.margaretha.data.ErrorLog.clear()
+                                log = ""
+                            })
+                        }
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
             }

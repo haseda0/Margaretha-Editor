@@ -100,6 +100,7 @@ class PreviewController(private val context: Context, private val scope: Corouti
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                id.haseda.margaretha.data.ErrorLog.record("PREVIEW ${error.errorCodeName}", error, segments.joinToString { it.kind.toString() + " " + it.uri })
                 // Many devices cannot run the GPU effect pipeline. Fall back to plain playback once
                 // instead of leaving a black, frozen preview.
                 if (!safeMode && segments.isNotEmpty()) {
