@@ -1,3 +1,4 @@
+import java.net.URI
 import java.util.Properties
 
 plugins {
@@ -120,7 +121,7 @@ val downloadWhisperModel by tasks.registering {
         if (target.exists() && target.length() > 10_000_000) return@doLast
         target.parentFile.mkdirs()
         val tmp = File(target.parentFile, target.name + ".part")
-        java.net.URI("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin").toURL().openStream().use { input ->
+        URI("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin").toURL().openStream().use { input ->
             tmp.outputStream().use { input.copyTo(it) }
         }
         check(tmp.length() > 10_000_000) { "Whisper model download looks incomplete" }
